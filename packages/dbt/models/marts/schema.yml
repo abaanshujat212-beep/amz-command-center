@@ -1,0 +1,87 @@
+version: 2
+
+models:
+  - name: mart_sku_economics
+    description: >
+      Per-SKU unit economics and break_even_acos. The most important model in
+      the project -- every rule threshold is relative to break_even_acos.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: sku
+        tests: [not_null]
+      - name: break_even_acos
+        description: >
+          Null is allowed and meaningful: it means we do not know this SKU's
+          costs yet. Rules must skip null rather than assume a default.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: warn
+      - name: economics_incomplete
+        description: True when price or COGS is missing. Surfaced in the UI as a warning.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, sku]
+
+  - name: mart_ppc_campaign_daily
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: acos
+        description: Null when there are no attributed sales. Never 0.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              severity: warn
+      - name: is_settled
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id]
+
+  - name: mart_ppc_keyword_daily
+    description: Read by the rules engine for scope = 'keyword'.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: keyword_id
+        tests: [not_null]
+      - name: verdict
+        tests:
+          - accepted_values:
+              values: [strong, profitable, marginal, losing, no_sales, no_data, unknown]
+      - name: ctr
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: error
+      - name: cvr
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: error
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, keyword_id]
+
+  - name: mart_ppc_search_term_daily
+    description: Feeds the negate and harvest rules.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: search_term
+        tests: [not_null]
+      - name: is_already_negative
+        description: Prevents proposing a negative that already exists.
+        tests: [not_null]
+      - name: exists_as_exact
+        description: Prevents harvesting a term we already bid on exactly.
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id, ad_group_id, search_term, matched_keyword_id]
