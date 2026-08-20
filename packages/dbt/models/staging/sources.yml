@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  # Landed by dlt from the Amazon APIs. Never edited by hand.
+  - name: raw
+    schema: raw
+    description: dlt landing zone. Append-only; loaded_at drives deduplication.
+    freshness:
+      warn_after: {count: 36, period: hour}
+      error_after: {count: 72, period: hour}
+    loaded_at_field: loaded_at
+    tables:
+      - name: raw_ads_sp_campaign_daily
+      - name: raw_ads_sp_keyword_daily
+      - name: raw_ads_sp_search_term_daily
+      - name: raw_ads_advertised_product_daily
+      - name: raw_ads_negative_keywords
+        # Configuration state, not a daily report -- no freshness expectation.
+        freshness: null
+      - name: raw_sales_traffic_asin_daily
+
+  # Application tables. Read-only from dbt's point of view.
+  - name: app
+    schema: public
+    tables:
+      - name: sku_cost_ledger
+      - name: tenant
+      - name: tenant_settings
