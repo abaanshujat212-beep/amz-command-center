@@ -1,0 +1,13 @@
+# Copy to ~/.dbt/profiles.yml (or set DBT_PROFILES_DIR). Never commit real values.
+axaty:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: axaty
+      password: axaty
+      dbname: axaty
+      schema: analytics
+      threads: 4

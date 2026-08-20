@@ -1,0 +1,31 @@
+name: axaty
+version: "1.0.0"
+config-version: 2
+
+profile: axaty
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Rules must never act on unsettled data. Everything downstream respects this.
+  settlement_lag_days: 3
+  ads_lookback_days: 95
+  default_target_acos: 0.35
+  reporting_timezone: "Europe/London"
+  currency: "GBP"
+
+models:
+  axaty:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts

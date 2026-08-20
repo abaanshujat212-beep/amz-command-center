@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: stg_ads_sp_campaign_daily
+    description: >
+      One row per tenant, campaign and day from the Sponsored Products campaign
+      report. Staging only renames and casts — no business logic.
+    columns:
+      - name: tenant_id
+        description: Owning tenant. Never null; RLS depends on it.
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null]
+      - name: cost
+        description: Spend in the account currency (GBP for the UK marketplace).
+      - name: attributed_sales_7d
+        description: Attributed sales, 7-day window. Amazon restates this for days.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id]
+
+  - name: stg_ads_sp_keyword_daily
+    description: One row per tenant, keyword/target and day.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: keyword_id
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, keyword_id]
+
+  - name: stg_sales_traffic_asin_daily
+    description: >
+      Sales & Traffic at CHILD ASIN granularity. CHILD is mandatory — it is the
+      grain that joins to the Ads advertised ASIN. PARENT breaks attribution
+      silently and makes TACoS meaningless.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: child_asin
+        tests: [not_null]
+      - name: ordered_product_sales
+        description: Total sales for the ASIN (ads + organic). Denominator of TACoS.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, child_asin]
