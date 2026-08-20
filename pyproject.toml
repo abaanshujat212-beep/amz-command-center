@@ -1,0 +1,57 @@
+[project]
+name = "axaty-command-center"
+version = "0.1.0"
+description = "Amazon PPC + product analytics command centre (UK marketplace)"
+requires-python = ">=3.11"
+
+dependencies = [
+  "python-amazon-sp-api>=1.8",
+  "python-amazon-ad-api>=0.6",
+  "dlt[postgres]>=1.0",
+  "dbt-core>=1.8",
+  "dbt-postgres>=1.8",
+  "psycopg[binary]>=3.1",
+  "cryptography>=42.0",
+  "apscheduler>=3.10",
+  "pydantic>=2.6",
+  "httpx>=0.27",
+  "tenacity>=8.2",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+markers = [
+  "db: requires a running postgres (make up)",
+  "live: talks to a real Amazon API; never run in CI",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "RUF"]
+ignore = [
+  "S101",   # asserts are fine in tests
+  "E501",   # line length handled by the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]   # hardcoded local-dev passwords in fixtures
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true
