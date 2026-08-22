@@ -13,19 +13,38 @@ retention window forever.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 BACKFILL_DAYS = 95
 SETTLEMENT_LAG_DAYS = 3
 REINGEST_DAYS = 14
 
-DATASETS = {
-    "ads_sp_campaign_daily": "spCampaigns",
-    "ads_sp_ad_group_daily": "spAdGroups",
-    "ads_sp_keyword_daily": "spTargeting",
-    "ads_sp_search_term_daily": "spSearchTerm",
-    "ads_sp_advertised_product_daily": "spAdvertisedProduct",
-    "ads_sp_purchased_product_daily": "spPurchasedProduct",
+
+@dataclass(frozen=True)
+class ReportSpec:
+    """How one dataset is requested from the Ads reporting API.
+
+    A dataset is not the same thing as a report type. Placement data is the
+    campaign report asked for with an extra groupBy — same report kind, same
+    lookback, different grain. Storing only the kind made that impossible to
+    express, which is why the placement mart had no source at all (#27).
+    """
+
+    kind: str
+    group_by: tuple[str, ...] = ()
+
+
+DATASETS: dict[str, ReportSpec] = {
+    "ads_sp_campaign_daily": ReportSpec("spCampaigns", ("campaign",)),
+    # Same report as above, one grain finer. Placements partition the campaign,
+    # so these two must land in separate raw tables and never be summed
+    # together: doing so double-counts spend and halves every ACOS.
+    "ads_sp_placement_daily": ReportSpec("spCampaigns", ("campaign", "campaignPlacement")),
+    "ads_sp_ad_group_daily": ReportSpec("spAdGroups", ("adGroup",)),
+    "ads_sp_keyword_daily": ReportSpec("spTargeting", ("targeting",)),
+    "ads_sp_search_term_daily": ReportSpec("spSearchTerm", ("searchTerm",)),
+    "ads_sp_advertised_product_daily": ReportSpec("spAdvertisedProduct", ("advertiser",)),
+    "ads_sp_purchased_product_daily": ReportSpec("spPurchasedProduct", ("asin",)),
 }
 
 
@@ -82,8 +101,10 @@ def run(tenant_id: str, dry_run: bool = True) -> None:
       1. load credentials from the vault for this tenant
       2. read sync_watermark for each dataset
       3. plan_dates(...) -> chunk into report requests
-      4. create/poll/download via AdsClient
+      4. create/poll/download via AdsClient, passing spec.group_by
       5. dlt merge on the natural key (tenant_id, report_date, entity_id)
+         — for placement that key is (tenant_id, report_date, campaign_id,
+           placement_classification), not campaign_id alone
       6. update sync_watermark + pipeline_run
     """
     raise NotImplementedError("see issue M1-09")
