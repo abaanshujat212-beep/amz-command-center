@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.rules.guardrails import DIAGNOSTIC_ACTIONS
+
 MAX_DEPTH = 8
 MAX_NODES = 120
 
@@ -39,7 +41,11 @@ METRICS: dict[str, str] = {
     "budget_utilisation": "m.budget_utilisation",
     "days_capped": "m.days_capped",
     "top_of_search_is": "m.top_of_search_impression_share",
+    # Account-wide benchmarks. Diagnostics compare an entity to the account
+    # rather than to a fixed number, because "good CTR" is category-specific:
+    # 0.3% is fine for a broad term and terrible for a branded exact.
     "account_cvr": "m.account_cvr",
+    "account_ctr": "m.account_ctr",
     "break_even_acos": "e.break_even_acos",
     "contribution_margin_pct": "e.contribution_margin_pct",
     "is_already_negative": "m.is_already_negative",
@@ -50,6 +56,10 @@ COMPARISONS = {"<": "<", "<=": "<=", ">": ">", ">=": ">=", "==": "=", "!=": "<>"
 ARITHMETIC = {"+": "+", "-": "-", "*": "*", "/": "/"}
 LOGICAL = {"and": "and", "or": "or"}
 OPS = set(COMPARISONS) | set(ARITHMETIC) | set(LOGICAL) | {"not"}
+
+# Keys that mean "change something". A diagnostic carrying any of these is a
+# misconfigured rule, not a harmless one -- see _assert_diagnostic_is_inert.
+MUTATION_KEYS = ("op", "factor", "delta", "delta_pct", "value", "match_type", "level")
 
 
 class RuleValidationError(ValueError):
@@ -142,13 +152,36 @@ def validate(condition: dict) -> None:
 
 
 # --------------------------------------------------------------- action side
+def _assert_diagnostic_is_inert(action: dict) -> None:
+    """A diagnostic must carry no instruction to change anything.
+
+    Cheap to check, and the failure it prevents is expensive: a rule authored
+    as {"type": "flag", "op": "multiply", "factor": 0.5} would read as harmless
+    in the UI while the apply path found a real op to execute.
+    """
+    present = [k for k in MUTATION_KEYS if k in action]
+    if present:
+        raise RuleValidationError(
+            f"diagnostic action '{action.get('type')}' must not carry "
+            f"mutation keys {present}; diagnostics only report"
+        )
+
+
 def resolve_action(action: dict, current_value: float | None) -> float | None:
     """Turn an action descriptor + current value into a target value.
 
-    Returns None for actions that carry no numeric value (pause, negatives).
-    Guardrails still clamp whatever comes out of here.
+    Returns None for actions that carry no numeric value (pause, negatives,
+    diagnostics). Guardrails still clamp whatever comes out of here.
     """
     kind = action.get("type")
+
+    # Diagnostics resolve to no value at all. They are checked first so that a
+    # flag rule can never take the "needs a current value" path below and be
+    # silently dropped from the run.
+    if kind in DIAGNOSTIC_ACTIONS:
+        _assert_diagnostic_is_inert(action)
+        return None
+
     if kind in ("pause", "enable", "add_negative_exact", "add_negative_phrase"):
         return None
 
