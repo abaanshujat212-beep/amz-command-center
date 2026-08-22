@@ -108,8 +108,29 @@ class AdsClient:
                 "Those days are gone permanently — this is why ingestion runs daily."
             )
 
-    def create_report(self, report_kind: str, start_date: dt.date, end_date: dt.date) -> str:
+    def create_report(
+        self,
+        report_kind: str,
+        start_date: dt.date,
+        end_date: dt.date,
+        group_by: tuple[str, ...] = (),
+    ) -> str:
+        """Request a report and return its id.
+
+        group_by is the report's GRAIN, and it is not optional: reporting v3
+        rejects a configuration without one, and two of our datasets differ by
+        nothing else. spCampaigns grouped by ('campaign',) is the campaign
+        report; grouped by ('campaign', 'campaignPlacement') it is the placement
+        report. Defaulting it would land campaign-grain rows in the placement
+        table, where every placement would look like 100% of the campaign.
+        """
         self.check_lookback(report_kind, start_date)
+        if not group_by:
+            raise ValueError(
+                f"{report_kind}: group_by is required — it decides the grain of the "
+                "rows, and the wrong grain is worse than no rows. See "
+                "services/ingest/pipelines/ads_daily.py DATASETS."
+            )
         raise NotImplementedError("see M0-06")
 
     def wait_for_report(self, report_id: str, timeout_s: int = 1800) -> str:
@@ -128,4 +149,35 @@ class AdsClient:
         """Write-back is gated: guardrails live in services/actions (M4-21, M5-22)."""
         if dry_run:
             return {"status": "WOULD_DO", "entity_id": entity_id, "bid": new_bid}
+        raise NotImplementedError("write-back lands in M5-22, not before")
+
+    def update_placement_modifier(
+        self,
+        campaign_id: str,
+        placement_api_enum: str,
+        new_percentage: float,
+        current_percentage: float | None,
+        dry_run: bool = True,
+    ) -> dict:
+        """Placement bid adjustment on a campaign's dynamicBidding.
+
+        current_percentage must be read from Amazon, not assumed. A placement
+        modifier is a percentage on top of whatever is already set, and nothing
+        ingests the existing value yet (#32) — so this refuses rather than
+        computing a change from an assumed 0% and wiping a modifier the seller
+        set by hand.
+        """
+        if current_percentage is None:
+            raise ValueError(
+                f"campaign {campaign_id}: refusing to set {placement_api_enum} to "
+                f"{new_percentage}% without knowing the current modifier (#32)"
+            )
+        if dry_run:
+            return {
+                "status": "WOULD_DO",
+                "campaign_id": campaign_id,
+                "placement": placement_api_enum,
+                "from": current_percentage,
+                "to": new_percentage,
+            }
         raise NotImplementedError("write-back lands in M5-22, not before")
