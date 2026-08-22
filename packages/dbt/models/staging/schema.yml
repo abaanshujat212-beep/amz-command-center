@@ -21,6 +21,34 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [tenant_id, report_date, campaign_id]
 
+  - name: stg_ads_sp_placement_daily
+    description: >
+      The same campaign report at placement grain. Tested on the RAW placement
+      value, not the canonical one: two Amazon spellings can normalise to the
+      same code, and that must not read as a duplicate here.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null]
+      - name: placement_raw
+        description: Exactly what Amazon sent. Kept for debugging the mapping.
+        tests: [not_null]
+      - name: placement
+        description: >
+          Canonical code. 'unknown' is deliberately excluded from the accepted
+          list at warn severity — a new Amazon spelling would otherwise vanish
+          into 'unknown' and quietly switch the placement rules off.
+        tests:
+          - accepted_values:
+              values: [top_of_search, product_page, rest_of_search, off_amazon]
+              severity: warn
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id, placement_raw]
+
   - name: stg_ads_sp_keyword_daily
     description: One row per tenant, keyword/target and day.
     columns:

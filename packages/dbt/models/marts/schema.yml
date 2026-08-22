@@ -42,6 +42,41 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [tenant_id, report_date, campaign_id]
 
+  - name: mart_ppc_placement_daily
+    description: >
+      Read by the rules engine for scope = 'placement'. Placements partition the
+      campaign, so summing this mart reproduces mart_ppc_campaign_daily -- these
+      two must never be joined additively.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: placement_entity_id
+        description: campaign_id:placement — the grain a placement modifier is set at.
+        tests: [not_null]
+      - name: placement
+        tests:
+          - accepted_values:
+              values: [top_of_search, product_page, rest_of_search, off_amazon]
+              severity: warn
+      - name: cvr
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: error
+      - name: spend_share
+        description: Share of the campaign's spend. Sums to 1 across placements.
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: error
+      - name: is_settled
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id, placement]
+
   - name: mart_ppc_keyword_daily
     description: Read by the rules engine for scope = 'keyword'.
     columns:
