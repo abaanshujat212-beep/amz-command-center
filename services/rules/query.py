@@ -15,6 +15,11 @@ compiled SQL refers to them (m.acos, e.break_even_acos, ...). Every metric in
 METRICS must be produced by EVERY scope, even as a typed null placeholder --
 otherwise a rule referencing it fails to resolve the column at run time instead
 of at authoring time.
+
+A scope missing from SCOPE_SOURCES is not an error the engine can fix: it skips
+the rule with a note and carries on. That is how flag_low_cvr_placement sat
+dead for a whole milestone (Defect D, issue #27), so tests assert that every
+rule in the catalog has a wired scope.
 """
 
 from __future__ import annotations
@@ -23,10 +28,17 @@ import datetime as dt
 from typing import Any
 
 # scope -> (mart table, entity id column, the column a change writes to)
+#
+# placement's write target is placement_modifier_pct, which the mart currently
+# publishes as NULL because campaign placement-bidding config is not ingested
+# yet (#32). That null is load-bearing: it makes an add_pct action refuse for
+# want of a current value instead of assuming 0% and overwriting a real
+# modifier the seller set by hand.
 SCOPE_SOURCES: dict[str, tuple[str, str, str]] = {
     "campaign": ("mart_ppc_campaign_daily", "campaign_id", "budget_amount"),
     "keyword": ("mart_ppc_keyword_daily", "keyword_id", "bid"),
     "search_term": ("mart_ppc_search_term_daily", "search_term", "bid"),
+    "placement": ("mart_ppc_placement_daily", "placement_entity_id", "placement_modifier_pct"),
 }
 
 # Metrics every scope can produce.
@@ -90,6 +102,23 @@ _SCOPE_AGG: dict[str, str] = {
         null::numeric                             as account_ctr,
         null::numeric                             as contribution_margin_pct,
         null::numeric                             as tacos
+    """,
+    # Placement inherits the campaign's economics and budget (the mart joins
+    # them from mart_ppc_campaign_daily), so a placement rule can still reason
+    # about break-even and budget pressure. bid is null: a placement has no bid,
+    # only a percentage modifier on the campaign's bids.
+    "placement": """
+        avg(account_cvr)                          as account_cvr,
+        avg(account_ctr)                          as account_ctr,
+        min(contribution_margin_pct)              as contribution_margin_pct,
+        max(budget_amount)                        as budget_amount,
+        avg(budget_utilisation)                   as budget_utilisation,
+        count(*) filter (where budget_utilisation >= 0.98) as days_capped,
+        null::numeric                             as bid,
+        null::numeric                             as top_of_search_impression_share,
+        null::numeric                             as tacos,
+        false                                     as is_already_negative,
+        false                                     as exists_as_exact
     """,
 }
 
