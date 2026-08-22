@@ -11,6 +11,11 @@ sources:
     loaded_at_field: loaded_at
     tables:
       - name: raw_ads_sp_campaign_daily
+      - name: raw_ads_sp_placement_daily
+        description: >
+          The campaign report requested with a placement groupBy. Same source
+          report as raw_ads_sp_campaign_daily at a finer grain -- keep them
+          separate, never additive.
       - name: raw_ads_sp_keyword_daily
       - name: raw_ads_sp_search_term_daily
       - name: raw_ads_advertised_product_daily
