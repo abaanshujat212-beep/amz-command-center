@@ -34,7 +34,8 @@ class RunSummary:
     rules_run: int = 0
     entities_evaluated: int = 0
     matched: int = 0
-    proposed: int = 0
+    proposed: int = 0          # changes queued for approval
+    flagged: int = 0           # diagnostics raised (nothing to approve)
     blocked: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
 
@@ -122,6 +123,13 @@ def evaluate_tenant(
                 )
                 continue
 
+            action_type = rule["action_jsonb"]["type"]
+            # A diagnostic changes nothing, so it neither respects nor consumes
+            # the one-rule-per-entity claim. Letting it claim would mean a
+            # "low CTR" finding silently cancelling a bid change on the same
+            # keyword -- two unrelated outputs competing for one slot.
+            diagnostic = gr.is_diagnostic(action_type)
+
             s.rules_run += 1
             rows = fetch_candidates(
                 cur,
@@ -138,7 +146,7 @@ def evaluate_tenant(
 
             for row in matched:
                 key = (rule["scope"], row["entity_id"])
-                if key in claimed:
+                if not diagnostic and key in claimed:
                     continue  # a higher-priority rule already owns this entity
 
                 current = row.get("current_value")
@@ -152,7 +160,7 @@ def evaluate_tenant(
                 proposal = gr.Proposal(
                     entity_type=rule["scope"],
                     entity_id=row["entity_id"],
-                    action_type=rule["action_jsonb"]["type"],
+                    action_type=action_type,
                     before_value=current,
                     after_value=target,
                     clicks=int(row.get("clicks") or 0),
@@ -192,7 +200,7 @@ def evaluate_tenant(
                         through,
                         json.dumps(metrics, default=str),
                         json.dumps(
-                            {"type": proposal.action_type, "value": decision.value},
+                            {"type": action_type, "value": decision.value},
                             default=str,
                         ),
                         reason,
@@ -207,6 +215,8 @@ def evaluate_tenant(
 
                 # Always queued as pending. Dry-run proposals are reviewable but
                 # can never be applied; that check lives in services/actions.
+                # Diagnostics are pending too: pending means "unread" for them,
+                # and 0006 forbids them from ever reaching 'applied'.
                 cur.execute(
                     "insert into action (tenant_id, rule_id, evaluation_id,"
                     " entity_type, entity_id, action_type, before_value,"
@@ -219,17 +229,24 @@ def evaluate_tenant(
                         evaluation_id,
                         rule["scope"],
                         key[1],
-                        proposal.action_type,
+                        action_type,
                         json.dumps({"value": current}),
-                        json.dumps({"value": decision.value}),
+                        json.dumps(
+                            {"value": decision.value, "diagnostic": True}
+                            if diagnostic
+                            else {"value": decision.value}
+                        ),
                         reason,
                         decision.clamped,
                         "; ".join(decision.notes) or None,
                         f"{run_id}:{rule['code']}:{key[1]}",
                     ),
                 )
-                claimed.add(key)
-                s.proposed += 1
+                if diagnostic:
+                    s.flagged += 1
+                else:
+                    claimed.add(key)
+                    s.proposed += 1
 
         # Column names must match 0001_tenancy.sql: dataset (not pipeline),
         # rows_loaded, detail. Getting this wrong rolls back the entire run.
@@ -241,7 +258,7 @@ def evaluate_tenant(
                 tenant_id,
                 through,
                 "partial" if s.errors else "success",
-                s.proposed,
+                s.proposed + s.flagged,
                 json.dumps(asdict(s), default=str),
             ),
         )
