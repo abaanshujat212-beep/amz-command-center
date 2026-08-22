@@ -11,7 +11,10 @@ Two things here are easy to get wrong and expensive to get wrong:
    which silently turned every rule into "match everything".
 
 Column aliases here must match compiler.METRICS exactly, because that is how the
-compiled SQL refers to them (m.acos, e.break_even_acos, ...).
+compiled SQL refers to them (m.acos, e.break_even_acos, ...). Every metric in
+METRICS must be produced by EVERY scope, even as a typed null placeholder --
+otherwise a rule referencing it fails to resolve the column at run time instead
+of at authoring time.
 """
 
 from __future__ import annotations
@@ -56,6 +59,7 @@ _SCOPE_AGG: dict[str, str] = {
         null::numeric                             as bid,
         null::numeric                             as top_of_search_impression_share,
         null::numeric                             as account_cvr,
+        null::numeric                             as account_ctr,
         null::numeric                             as contribution_margin_pct,
         null::numeric                             as tacos,
         false                                     as is_already_negative,
@@ -65,6 +69,7 @@ _SCOPE_AGG: dict[str, str] = {
         max(bid)                                  as bid,
         avg(top_of_search_impression_share)       as top_of_search_impression_share,
         avg(account_cvr)                          as account_cvr,
+        avg(account_ctr)                          as account_ctr,
         min(contribution_margin_pct)              as contribution_margin_pct,
         null::numeric                             as budget_amount,
         null::numeric                             as budget_utilisation,
@@ -82,6 +87,7 @@ _SCOPE_AGG: dict[str, str] = {
         null::numeric                             as days_capped,
         null::numeric                             as top_of_search_impression_share,
         null::numeric                             as account_cvr,
+        null::numeric                             as account_ctr,
         null::numeric                             as contribution_margin_pct,
         null::numeric                             as tacos
     """,
