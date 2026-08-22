@@ -17,6 +17,11 @@ adjusts bids, and none of them tell you that no bid will fix a bad main image.
 Raising a bid on a keyword with 20k impressions and 0.1% CTR just buys more
 proof that the listing does not convert browsers into clickers.
 
+The fourth, flag_low_cvr_placement, moved here from starter_rules (#27). It was
+always named 'flag' and described "recommend only", but carried a real
+set_placement_modifier mutation -- and a percentage modifier can only be
+computed from the modifier already in place, which nothing ingests yet (#32).
+
 Why these are 'flag' and not automated changes: the fix lives outside the ads
 account. Nothing in the Ads API can rewrite a title or reshoot a photo, so a
 rule that "acts" here could only act on the wrong lever -- lowering bids and
@@ -115,6 +120,35 @@ DIAGNOSTIC_RULES: list[dict] = [
             "across {attributed_orders} orders. Every order is losing contribution. "
             "Decide deliberately: raise price, cut cost, cut spend, or accept it as "
             "launch investment."
+        ),
+    },
+    {
+        "code": "flag_low_cvr_placement",
+        "name": "Placement converting far below the account (report only)",
+        "description": (
+            "One placement -- top of search, product page or rest of search -- "
+            "converts at under half the account CVR. The lever is a placement bid "
+            "modifier on the campaign, which is applied by hand for now: the "
+            "current modifier is not ingested, and a percentage change computed "
+            "from an assumed 0% would silently overwrite one the seller set."
+        ),
+        "scope": "placement",
+        "priority": 93,
+        "lookback_days": 30,
+        "min_clicks": 100,
+        "min_impressions": 5000,
+        "condition": {
+            "and": [
+                {">=": [{"var": "clicks"}, 100]},
+                {"<": [{"var": "cvr"}, {"*": [{"var": "account_cvr"}, 0.5]}]},
+            ]
+        },
+        "action": {"type": "flag", "severity": "warning", "diagnosis": "placement_mix"},
+        "reason_template": (
+            "This placement converts at {cvr:.2%} against an account average of "
+            "{account_cvr:.2%} over {clicks} clicks and {cost:.2f} spend. Consider a "
+            "negative placement modifier on the campaign, or check whether the "
+            "traffic this slot sends matches the product at all."
         ),
     },
 ]
