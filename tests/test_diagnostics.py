@@ -21,6 +21,7 @@ from services.rules.compiler import (
     resolve_action,
 )
 from services.rules.diagnostic_rules import DIAGNOSTIC_RULES
+from services.rules.query import SCOPE_SOURCES
 from services.rules.rule_catalog import ALL_RULES, all_rule_rows
 from services.rules.starter_rules import STARTER_RULES, rule_rows
 
@@ -156,12 +157,13 @@ def test_findings_still_obey_data_quality():
 
 
 # ------------------------------------------------------------------- catalog
-def test_the_three_planned_diagnostics_exist():
+def test_the_planned_diagnostics_exist():
     codes = {r["code"] for r in DIAGNOSTIC_RULES}
     assert codes == {
         "flag_low_ctr_listing",
         "flag_low_cvr_detail_page",
         "flag_above_break_even",
+        "flag_low_cvr_placement",
     }
 
 
@@ -170,6 +172,39 @@ def test_every_catalog_rule_compiles():
         sql, params = compile_condition(rule["condition"])
         assert "select" not in sql.lower(), rule["code"]
         assert params, rule["code"]
+
+
+def test_every_catalog_rule_has_a_wired_scope():
+    """Defect D / #27: a scope the query layer never heard of is silent death.
+
+    engine.py records "scope not wired yet" and moves on, which looks like a
+    healthy run with one fewer rule. flag_low_cvr_placement sat dead that way
+    for an entire milestone.
+    """
+    for rule in ALL_RULES:
+        assert rule["scope"] in SCOPE_SOURCES, rule["code"]
+
+
+def test_placement_scope_reads_the_placement_mart_at_the_right_grain():
+    table, id_col, value_col = SCOPE_SOURCES["placement"]
+    assert table == "mart_ppc_placement_daily"
+    # a modifier is set per campaign per placement, so the entity is the pair --
+    # a campaign-level id would let one placement silence another
+    assert id_col == "placement_entity_id"
+    assert value_col == "placement_modifier_pct"
+
+
+def test_placement_diagnostic_proposes_no_modifier():
+    """It used to carry set_placement_modifier / add_pct -20 (#27).
+
+    A percentage change needs the modifier already in place as its base. Nothing
+    ingests that yet, so proposing from an assumed 0% could overwrite a +50%
+    the seller set by hand.
+    """
+    rule = next(r for r in DIAGNOSTIC_RULES if r["code"] == "flag_low_cvr_placement")
+    assert rule["action"]["type"] == "flag"
+    assert "op" not in rule["action"] and "delta_pct" not in rule["action"]
+    assert resolve_action(rule["action"], 0.0) is None
 
 
 def test_diagnostic_reason_templates_render_without_metrics():
@@ -193,6 +228,12 @@ def test_catalog_seeds_starter_and_diagnostic_rules():
     rows = all_rule_rows("11111111-1111-1111-1111-111111111111")
     assert len(rows) == len(STARTER_RULES) + len(DIAGNOSTIC_RULES)
     assert all(r["enabled"] is False and r["dry_run"] is True for r in rows)
+
+
+def test_starter_rules_are_all_change_actions():
+    """The split is the point: starter_rules changes things, diagnostics report."""
+    for rule in STARTER_RULES:
+        assert rule["action"]["type"] not in gr.DIAGNOSTIC_ACTIONS, rule["code"]
 
 
 def test_catalog_shaping_matches_starter_rules_shaping():
