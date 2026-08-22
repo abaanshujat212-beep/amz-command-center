@@ -4,6 +4,11 @@
 -- break_even_acos comes from mart_sku_economics via the advertised ASIN. If a
 -- keyword advertises several ASINs we take the WORST (lowest) break-even, so a
 -- rule can never be more aggressive than the thinnest-margin product it sells.
+--
+-- account_cvr / account_ctr are account-wide daily benchmarks. Diagnostics
+-- compare a keyword to the account instead of to a fixed number, because
+-- "low CTR" has no absolute value: 0.3% is normal for a broad discovery term
+-- and alarming for a branded exact.
 
 with kw as (
 
@@ -41,13 +46,15 @@ ad_group_economics as (
 
 ),
 
-account_cvr as (
+account_benchmarks as (
 
     select
         tenant_id,
         report_date,
         case when sum(clicks) > 0
-             then sum(attributed_orders_7d)::numeric / sum(clicks) end as account_cvr
+             then sum(attributed_orders_7d)::numeric / sum(clicks) end as account_cvr,
+        case when sum(impressions) > 0
+             then sum(clicks)::numeric / sum(impressions) end          as account_ctr
     from kw
     group by 1, 2
 
@@ -87,6 +94,7 @@ select
     g.contribution_margin_pct,
     g.economics_incomplete,
     a.account_cvr,
+    a.account_ctr,
 
     -- profitability verdict, relative to break-even and never to a fixed number
     case
@@ -106,7 +114,7 @@ from kw k
 left join ad_group_economics g
     on  k.tenant_id   = g.tenant_id
     and k.ad_group_id = g.ad_group_id
-left join account_cvr a
+left join account_benchmarks a
     on  k.tenant_id   = a.tenant_id
     and k.report_date = a.report_date
 left join lateral (
