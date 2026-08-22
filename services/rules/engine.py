@@ -231,10 +231,19 @@ def evaluate_tenant(
                 claimed.add(key)
                 s.proposed += 1
 
+        # Column names must match 0001_tenancy.sql: dataset (not pipeline),
+        # rows_loaded, detail. Getting this wrong rolls back the entire run.
         cur.execute(
-            "insert into pipeline_run (tenant_id, pipeline, status, detail)"
-            " values (%s, 'rules_evaluate', 'success', %s)",
-            (tenant_id, json.dumps(asdict(s), default=str)),
+            "insert into pipeline_run (tenant_id, dataset, date_to, status,"
+            " rows_loaded, finished_at, detail)"
+            " values (%s, 'rules_evaluate', %s, %s, %s, now(), %s)",
+            (
+                tenant_id,
+                through,
+                "partial" if s.errors else "success",
+                s.proposed,
+                json.dumps(asdict(s), default=str),
+            ),
         )
         conn.commit()
 
