@@ -1,4 +1,4 @@
-"""Seed local development tenants with the starter rules.
+"""Seed local development tenants with the full rule catalog.
 
     python -m packages.db.seed                              # both dev tenants
     python -m packages.db.seed --name "Client A" --slug client-a   # just one
@@ -6,6 +6,10 @@
 Two tenants are seeded by default, deliberately. The RLS isolation gate (#3)
 needs a second tenant to have something it *fails* to read; with a single
 tenant that test can pass while demonstrating nothing.
+
+Rules come from services.rules.rule_catalog, not from starter_rules directly.
+That indirection exists because seeding "whatever lives in one file" is how the
+three planned diagnostic rules went missing for a whole milestone (#28).
 
 Two things about this file are load-bearing, both learned the hard way:
 
@@ -34,7 +38,7 @@ import uuid
 import psycopg
 from psycopg.rows import dict_row
 
-from services.rules.starter_rules import rule_rows
+from services.rules.rule_catalog import all_rule_rows
 
 ADMIN_URL = os.environ.get(
     "DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty"
@@ -81,7 +85,8 @@ def seed_tenant(conn, name: str, slug: str) -> uuid.UUID:
         )
 
         rules = 0
-        for row in rule_rows(str(tenant_id)):
+        flags = 0
+        for row in all_rule_rows(str(tenant_id)):
             cur.execute(
                 """
                 insert into rule (tenant_id, code, name, description, enabled,
@@ -106,11 +111,13 @@ def seed_tenant(conn, name: str, slug: str) -> uuid.UUID:
                 },
             )
             rules += 1
+            if row["action_jsonb"].get("type") == "flag":
+                flags += 1
 
     # Commit per tenant. This also clears app.tenant_id, which is why
     # set_tenant() is called again at the top of the next tenant.
     conn.commit()
-    print(f"  {slug:<10} {tenant_id}  {rules} rules")
+    print(f"  {slug:<10} {tenant_id}  {rules} rules ({flags} diagnostic)")
     return tenant_id
 
 
