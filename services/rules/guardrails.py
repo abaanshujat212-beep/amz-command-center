@@ -7,6 +7,25 @@ Every proposed action passes through check() twice:
 Nothing is ever silently suppressed. A blocked proposal is stored with the name
 of the guardrail that blocked it, because invisible automation is untrustworthy
 automation.
+
+TWO CLASSES OF PROPOSAL (issue #28)
+A change and a diagnosis are not the same thing and must not be guarded the
+same way. Guardrails exist to limit DAMAGE, and a diagnosis cannot cause any:
+it changes nothing at Amazon. Running the mutation guardrails over diagnostics
+silences them exactly when they matter most:
+
+  * kill switch     -- automation_enabled is false by default, so a brand-new
+                       tenant would see zero findings. That is the state where
+                       findings are the entire product.
+  * blast radius    -- "30% of your keywords have terrible CTR" is a real
+                       finding, not a runaway rule. Halting it hides the truth.
+  * cooldown        -- a diagnosis does not need to settle; nothing was done.
+  * daily change    -- diagnostics consume no change budget.
+  * clamp / bounds  -- there is no number to clamp.
+
+Data-quality guardrails still apply in full, because a diagnosis drawn from
+stale, unsettled or thin data is simply wrong, and a confidently wrong
+recommendation costs trust faster than no recommendation at all.
 """
 
 from __future__ import annotations
@@ -14,6 +33,15 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 from enum import Enum
+
+# Action types that only ever report a finding. They never reach the Amazon
+# APIs; 0006_diagnostic_actions.sql enforces that in the database too.
+DIAGNOSTIC_ACTIONS: frozenset[str] = frozenset({"flag"})
+
+
+def is_diagnostic(action_type: str) -> bool:
+    """True for recommend-only action types."""
+    return action_type in DIAGNOSTIC_ACTIONS
 
 
 class Guard(str, Enum):
@@ -52,12 +80,16 @@ class TenantGuardConfig:
 class Proposal:
     entity_type: str
     entity_id: str
-    action_type: str                       # 'set_bid' | 'set_budget' | 'pause' | ...
+    action_type: str                       # 'set_bid' | 'set_budget' | 'flag' | ...
     before_value: float | None
     after_value: float | None
     clicks: int = 0
     impressions: int = 0
     break_even_acos: float | None = None
+
+    @property
+    def is_diagnostic(self) -> bool:
+        return is_diagnostic(self.action_type)
 
 
 @dataclass
@@ -116,6 +148,42 @@ def apply_bounds(
     return value, False, None
 
 
+def _data_quality(
+    d: Decision,
+    proposal: Proposal,
+    cfg: TenantGuardConfig,
+    ctx: RunContext,
+    min_clicks: int,
+    min_impressions: int,
+) -> Decision | None:
+    """Guardrails about whether the DATA can support any conclusion.
+
+    Applied to changes and diagnostics alike. Returns a blocked Decision, or
+    None when the data is good enough to proceed.
+    """
+    # Acting on stale data is worse than not acting.
+    age_h = (ctx.now - ctx.data_loaded_at).total_seconds() / 3600
+    if age_h > cfg.max_data_age_hours:
+        return d.block(Guard.STALE_DATA, f"newest data is {age_h:.0f}h old")
+
+    # Settlement lag: Amazon restates attributed sales for days.
+    latest_settled = (ctx.now.date() - dt.timedelta(days=cfg.settlement_lag_days))
+    if ctx.data_through > latest_settled:
+        return d.block(
+            Guard.UNSETTLED_DATA,
+            f"data_through {ctx.data_through} is newer than the settled cutoff {latest_settled}",
+        )
+
+    # Thin data: no decisions on noise.
+    if proposal.clicks < min_clicks and proposal.impressions < min_impressions:
+        return d.block(
+            Guard.THIN_DATA,
+            f"only {proposal.clicks} clicks / {proposal.impressions} impressions",
+        )
+
+    return None
+
+
 def check(
     proposal: Proposal,
     cfg: TenantGuardConfig,
@@ -126,6 +194,17 @@ def check(
     """Run every guardrail. Order matters: cheapest and most absolute first."""
     d = Decision(allowed=True, value=proposal.after_value)
 
+    # 0. Diagnostics: data quality only. See the module docstring for why the
+    #    mutation guardrails are skipped rather than "passed" -- skipping is a
+    #    decision, and it is recorded in the notes so the UI can show it.
+    if proposal.is_diagnostic:
+        blocked = _data_quality(d, proposal, cfg, ctx, min_clicks, min_impressions)
+        if blocked is not None:
+            return blocked
+        d.value = None
+        d.notes.append("diagnostic: reports a finding, never sent to Amazon")
+        return d
+
     # 1. Kill switch beats everything, including mid-run.
     if not cfg.automation_enabled:
         return d.block(Guard.KILL_SWITCH, "automation_enabled is false for this tenant")
@@ -134,25 +213,10 @@ def check(
     if cfg.dry_run:
         d.notes.append("dry_run: recorded as WOULD_DO, not sent to Amazon")
 
-    # 3. Data freshness. Acting on stale data is worse than not acting.
-    age_h = (ctx.now - ctx.data_loaded_at).total_seconds() / 3600
-    if age_h > cfg.max_data_age_hours:
-        return d.block(Guard.STALE_DATA, f"newest data is {age_h:.0f}h old")
-
-    # 4. Settlement lag: Amazon restates attributed sales for days.
-    latest_settled = (ctx.now.date() - dt.timedelta(days=cfg.settlement_lag_days))
-    if ctx.data_through > latest_settled:
-        return d.block(
-            Guard.UNSETTLED_DATA,
-            f"data_through {ctx.data_through} is newer than the settled cutoff {latest_settled}",
-        )
-
-    # 5. Thin data: no decisions on noise.
-    if proposal.clicks < min_clicks and proposal.impressions < min_impressions:
-        return d.block(
-            Guard.THIN_DATA,
-            f"only {proposal.clicks} clicks / {proposal.impressions} impressions",
-        )
+    # 3-5. Data freshness, settlement lag, thin data.
+    blocked = _data_quality(d, proposal, cfg, ctx, min_clicks, min_impressions)
+    if blocked is not None:
+        return blocked
 
     # 6. Cooldown: let the previous change settle before judging it again.
     if ctx.last_applied_at is not None:
