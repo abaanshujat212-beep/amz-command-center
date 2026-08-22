@@ -1,4 +1,4 @@
-"""The 8 starter rules, expressed as DATA.
+"""The 7 starter CHANGE rules, expressed as DATA.
 
 These are seeded disabled and in dry-run. Every threshold is relative to
 break_even_acos (from sku_cost_ledger), never to a fixed ACOS number -- a 40%
@@ -6,6 +6,14 @@ ACOS is excellent on a 60% margin product and suicidal on a 15% margin one.
 
 Each rule needs a reason_template because a recommendation nobody understands
 is a recommendation nobody will approve.
+
+Everything here proposes a change to the ads account. Rules that only report a
+finding live in diagnostic_rules.py, and rule_catalog.py is what seeds both --
+import ALL_RULES from there, never this list alone.
+
+History worth keeping: flag_low_cvr_placement used to sit in this file with a
+set_placement_modifier action, despite being named 'flag' and described as
+"recommend only". It is now a diagnostic (#27).
 """
 
 from __future__ import annotations
@@ -160,26 +168,6 @@ STARTER_RULES: list[dict] = [
         "reason_template": (
             "Profitable ({acos:.1%} ACOS) but only {impressions} impressions and "
             "{top_of_search_is:.1%} top-of-search share. Bidding up 15% to buy visibility."
-        ),
-    },
-    {
-        "code": "flag_low_cvr_placement",
-        "name": "Flag low-CVR placements (recommend only)",
-        "scope": "placement",
-        "priority": 40,
-        "lookback_days": 30,
-        "min_clicks": 100,
-        "min_impressions": 5000,
-        "condition": {
-            "and": [
-                {">=": [{"var": "clicks"}, 100]},
-                {"<": [{"var": "cvr"}, {"*": [{"var": "account_cvr"}, 0.5]}]},
-            ]
-        },
-        "action": {"type": "set_placement_modifier", "op": "add_pct", "delta_pct": -20},
-        "reason_template": (
-            "Placement CVR {cvr:.1%} is under half the account average "
-            "{account_cvr:.1%} over {clicks} clicks. Suggesting a -20% modifier."
         ),
     },
 ]
