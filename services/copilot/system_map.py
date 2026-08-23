@@ -9,7 +9,7 @@ Nothing is copied into a prompt. A map that is authored by hand is wrong within 
 week and — worse — wrong invisibly. See ADR 006.
 
 Two halves:
-  static_map()  works with no database, so it is usable before anything runs
+  static_map()   works with no database, so it is usable before anything runs
   live_map(conn) needs Postgres, and is where the interesting questions live
 
 self_check() is the 'check the whole system' half: it cross-references the sources
@@ -36,6 +36,14 @@ ENV_EXAMPLE = ROOT / ".env.example"
 DBT_MODELS = ROOT / "packages" / "dbt" / "models"
 
 NOT_IN_MAP = "not in the system map"
+
+# Tables that legitimately hold no tenant_id and need no policy.
+TENANT_EXEMPT_TABLES = frozenset(
+    {
+        "public.schema_migrations",  # infrastructure, no tenant data
+        "public.tenant",  # protected by the tenant_self policy on id, not tenant_id
+    }
+)
 
 # Every guardrail needs a sentence a client would accept as an answer. If a new
 # Guard member lands without one, the test fails — an unexplained block is
@@ -69,7 +77,7 @@ class Finding:
 # --- code- and file-derived facts (no database needed) --------------------
 
 
-def migration_files() -> list[dict[str, str]]:
+def migration_files() -> list[dict[str, Any]]:
     out = []
     for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
         body = path.read_text(encoding="utf-8")
@@ -190,13 +198,12 @@ def live_map(conn) -> dict[str, Any]:
     ):
         tables.setdefault(f"{schema}.{table}", []).append(column)
 
-    policies = {
-        f"{schema}.{table}": name
-        for schema, table, name in _rows(
-            conn,
-            "select schemaname, tablename, policyname from pg_policies order by 1, 2",
-        )
-    }
+    policies: dict[str, list[str]] = {}
+    for schema, table, name in _rows(
+        conn,
+        "select schemaname, tablename, policyname from pg_policies order by 1, 2",
+    ):
+        policies.setdefault(f"{schema}.{table}", []).append(name)
 
     applied = [
         {"version": v, "name": n, "checksum": c, "applied_at": str(a)}
@@ -233,6 +240,52 @@ def build(conn=None) -> dict[str, Any]:
 # --- the checking half ----------------------------------------------------
 
 
+def _check_rls(live: dict[str, Any]) -> list[Finding]:
+    """Every table holding tenant data must have a policy standing over it.
+
+    This is the most valuable check here and the least visible failure. A
+    forgotten policy looks completely normal: careful developers still filter by
+    tenant in every query they write, so nothing misbehaves — until one query
+    does not, and it returns another client's spend. The database, not the
+    discipline of the person writing SQL, has to be the thing that refuses.
+    """
+    out: list[Finding] = []
+    for name, columns in live["tables"].items():
+        if not name.startswith("public.") or name in TENANT_EXEMPT_TABLES:
+            continue
+        if "tenant_id" not in columns:
+            continue
+        if not live["rls_policies"].get(name):
+            out.append(
+                Finding(
+                    "error",
+                    "rls",
+                    f"{name} has a tenant_id column but no row-level security policy. "
+                    f"Any query that forgets a tenant filter returns every tenant's rows.",
+                )
+            )
+
+    for name in live["rls_policies"]:
+        if name not in live["tables"]:
+            out.append(
+                Finding("warning", "rls", f"policy exists for {name}, which no longer exists.")
+            )
+
+    # The reverse mistake: a protected table nobody can read because the app role
+    # was never granted access is a availability bug, not a security one, but it
+    # fails at 3am rather than in review.
+    if "public.tenant" in live["tables"] and not live["rls_policies"].get("public.tenant"):
+        out.append(
+            Finding(
+                "error",
+                "rls",
+                "public.tenant has no policy; tenant_self is required because "
+                "FORCE ROW LEVEL SECURITY applies even to the owning role.",
+            )
+        )
+    return out
+
+
 def self_check(conn=None) -> list[Finding]:
     """Cross-reference every source and report the contradictions.
 
@@ -253,7 +306,7 @@ def self_check(conn=None) -> list[Finding]:
                     f"SCOPE_SOURCES, so the engine skips it without failing.",
                 )
             )
-        if rule["action_type"] not in static["action_types"] and static["action_types"]:
+        if static["action_types"] and rule["action_type"] not in static["action_types"]:
             out.append(
                 Finding(
                     "error",
@@ -274,11 +327,7 @@ def self_check(conn=None) -> list[Finding]:
                 )
             )
 
-    reachable = {
-        key
-        for mapping in ep.ACTION_ENDPOINTS.values()
-        for key in mapping.values()
-    }
+    reachable = {key for mapping in ep.ACTION_ENDPOINTS.values() for key in mapping.values()}
     for endpoint in ep.mutating():
         if endpoint.key not in reachable:
             out.append(
@@ -305,9 +354,7 @@ def self_check(conn=None) -> list[Finding]:
         if not migration["has_down"]:
             out.append(
                 Finding(
-                    "info",
-                    "migrations",
-                    f"{migration['name']} is forward-only (no down file).",
+                    "info", "migrations", f"{migration['name']} is forward-only (no down file)."
                 )
             )
 
@@ -342,9 +389,7 @@ def self_check(conn=None) -> list[Finding]:
                     f"match the live constraint {live['action_types']}.",
                 )
             )
-        for name in live["tables"]:
-            if name.startswith("marts.") or name.startswith("raw."):
-                continue
+        out.extend(_check_rls(live))
 
     return out
 
