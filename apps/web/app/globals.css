@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	color-scheme: light;
+}
+
+body {
+	@apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* Numbers line up column to column; misaligned digits hide magnitude. */
+.num {
+	@apply text-right tabular-nums;
+}
+
+.tone-good {
+	@apply text-good;
+}
+.tone-warn {
+	@apply text-warn;
+}
+.tone-bad {
+	@apply text-bad font-medium;
+}
+.tone-unknown {
+	@apply text-slate-400;
+}
