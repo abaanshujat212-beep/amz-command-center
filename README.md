@@ -19,7 +19,7 @@ reporting in one automated system — instead of Google Sheets plus manual bid c
 | Layer | State | Evidence |
 | --- | --- | --- |
 | Compose stack (Postgres 16, Redis, Metabase) | committed, never started | `infra/docker-compose.yml` |
-| Migrations `0001`–`0008` + matching `down/` | committed, never applied | `packages/db/migrations/` |
+| Migrations `0001`–`0009` + matching `down/` | committed, never applied | `packages/db/migrations/` |
 | Migration runner + ledger + checksums | committed, never run | `packages/db/migrate.py` |
 | Multi-tenancy + RLS policies | committed, never proven | `tests/test_rls_isolation.py` (never run) |
 | dbt project: 7 staging + 5 mart models | committed, never compiled | `packages/dbt/models/` |
@@ -42,7 +42,7 @@ pytest
 cd packages/dbt && dbt build
 ```
 
-Running a second `make migrate` must print `nothing to do: 8 migrations already applied` —
+Running a second `make migrate` must print `nothing to do: 9 migrations already applied` —
 that is the idempotency proof, not a nicety. This command is the closure gate for
 **#1, #2, #3, #19, #21, #27, #28, #29, #33**.
 
@@ -111,6 +111,10 @@ Three things in that chain are deliberate and easy to get wrong:
   forget — the dashboard and the copilot. Both are therefore denied `marts` entirely and read
   `copilot.<mart>` views instead, where the filter cannot be removed (`0007`, `0008`).
 
+Every decision on an action is attributed: `decided_by` / `decided_at` / `decision` cover both
+verdicts, while `approved_by` / `approved_at` stay approval-only so approval counts never
+quietly include refusals (`0009`).
+
 ---
 
 ## Repo layout
@@ -123,7 +127,7 @@ services/rules        starter_rules, diagnostic_rules, rule_catalog,
                       compiler, query, guardrails, engine
 services/actions      state_machine
 services/copilot      system_map (generated + self-checking), sql_guard (allowlist validator)
-packages/db           migrations/ (0001-0008) + down/, migrate.py, seed.py
+packages/db           migrations/ (0001-0009) + down/, migrate.py, seed.py
 packages/dbt          staging + marts models, schema tests, sources
 packages/shared       marketplaces.py, endpoints.py
 infra                 docker-compose.yml
