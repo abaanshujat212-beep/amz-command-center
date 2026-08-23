@@ -18,6 +18,15 @@ vars:
   reporting_timezone: "Europe/London"
   currency: "GBP"
 
+# The copilot reads marts only through tenant-filtered views in the copilot
+# schema (migration 0007). Rebuilding a mart drops the table and takes those
+# views with it, so they have to be recreated at the end of every run.
+#
+# The existence check keeps a checkout where 0007 has not been applied yet from
+# failing at the very end of a long build.
+on-run-end:
+  - "do $$ begin if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'copilot' and p.proname = 'refresh_views') then perform copilot.refresh_views(); end if; end $$;"
+
 models:
   axaty:
     staging:
