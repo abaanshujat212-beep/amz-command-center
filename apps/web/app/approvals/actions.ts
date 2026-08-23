@@ -17,6 +17,14 @@
  * operator sees. The alternative -- checking in TypeScript and then updating --
  * has a gap between the check and the write, and that gap is exactly where two
  * browser tabs approve the same change twice.
+ *
+ * Two column pairs are written, deliberately:
+ *
+ *   decided_by / decided_at / decision   every decision, approve or reject
+ *   approved_by / approved_at            approvals only
+ *
+ * Folding rejections into approved_by would have been one character of work and
+ * would have made every "how many approvals?" query wrong forever (0009).
  */
 
 import { revalidatePath } from "next/cache"
@@ -35,7 +43,7 @@ type DecidedRow = {
 async function decide(id: string, decision: "approved" | "rejected") {
 	if (!id) throw new Error("No action id submitted.")
 
-	// No identity, no approval. An audit trail whose actor is "the system" is
+	// No identity, no decision. An audit trail whose actor is "the system" is
 	// not an audit trail, and this action spends a client's money.
 	if (!canApprove()) {
 		throw new Error(
@@ -54,6 +62,9 @@ async function decide(id: string, decision: "approved" | "rejected") {
 			`
 			update action
 			   set status      = $3,
+			       decision    = $3,
+			       decided_by  = $2::uuid,
+			       decided_at  = now(),
 			       approved_by = case when $3 = 'approved' then $2::uuid else approved_by end,
 			       approved_at = case when $3 = 'approved' then now()    else approved_at end
 			 where id = $1::uuid
@@ -75,8 +86,9 @@ async function decide(id: string, decision: "approved" | "rejected") {
 
 		const r = rows[0]
 
-		// First audit_log writer in the codebase. Approval is the moment a human
-		// becomes answerable for a change, so it is the moment worth recording.
+		// First audit_log writer in the codebase. A decision is the moment a human
+		// becomes answerable for a change, so it is the moment worth recording --
+		// and a refusal is as much a decision as an approval.
 		await query<{ id: string }>(
 			c,
 			`insert into audit_log (tenant_id, actor_user_id, action, entity, before, after)
