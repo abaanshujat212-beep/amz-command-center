@@ -11,15 +11,15 @@ reporting in one automated system — instead of Google Sheets plus manual bid c
 ## Status: honest version
 
 > **Nothing in this repository has ever been executed.** No `make up`, no `make migrate`,
-> no `pytest`, no `dbt build`. Every line below marked *committed* means the code exists and
-> has been read; it does **not** mean it works.
+> no `pytest`, no `dbt build`, no `npm install`. Every line below marked *committed* means the
+> code exists and has been read; it does **not** mean it works.
 >
-> **32 issues open, 0 closed.**
+> **37 issues open, 0 closed.**
 
 | Layer | State | Evidence |
 | --- | --- | --- |
 | Compose stack (Postgres 16, Redis, Metabase) | committed, never started | `infra/docker-compose.yml` |
-| Migrations `0001`–`0006` + matching `down/` | committed, never applied | `packages/db/migrations/` |
+| Migrations `0001`–`0008` + matching `down/` | committed, never applied | `packages/db/migrations/` |
 | Migration runner + ledger + checksums | committed, never run | `packages/db/migrate.py` |
 | Multi-tenancy + RLS policies | committed, never proven | `tests/test_rls_isolation.py` (never run) |
 | dbt project: 7 staging + 5 mart models | committed, never compiled | `packages/dbt/models/` |
@@ -27,26 +27,36 @@ reporting in one automated system — instead of Google Sheets plus manual bid c
 | Action state machine | committed, never exercised | `services/actions/state_machine.py` |
 | Amazon clients (SP-API, Ads API) | committed, never authenticated | `services/ingest/clients/` |
 | Ads daily pipeline (plan/backfill logic) | committed, never fetched a byte | `services/ingest/pipelines/ads_daily.py` |
-| Test suite: 8 files | committed, **never run** | `tests/` |
-| Web dashboard | two helper files only | `apps/web/lib/` |
-| API layer, mobile app, scheduler, CI | not started | issues #15–#18, #24 |
+| System copilot: map, self-check, SQL guard | committed, never queried | `services/copilot/` |
+| Web dashboard: shell, Command Center, approvals | committed, never built or served | `apps/web/` |
+| Test suite: 10 files | committed, **never run** | `tests/` |
+| API layer, mobile app, scheduler, CI | not started | issues #17, #18, #24, #34 |
 
 ### The one command that changes this
 
 ```bash
-make up && make migrate && make migrate-status
+make up && make migrate && make migrate && make migrate-status
 make seed
 make testdb && make migrate-test
 pytest
 cd packages/dbt && dbt build
 ```
 
-Running a second `make migrate` must print `nothing to do: 6 migrations already applied` —
+Running a second `make migrate` must print `nothing to do: 8 migrations already applied` —
 that is the idempotency proof, not a nicety. This command is the closure gate for
-**#1, #2, #3, #19, #21, #27, #28, #29**.
+**#1, #2, #3, #19, #21, #27, #28, #29, #33**.
 
 `dbt build` will fail on the placement models until `raw_ads_sp_placement_daily` exists
 (that is #9, ingestion). For #27 the only question is whether the SQL *compiles*.
+
+The dashboard has a second, separate gate (**#15, #16, #22**):
+
+```bash
+cd apps/web && npm install && npm run build
+```
+
+It needs `DATABASE_URL_APP`, `DEV_TENANT_ID` and `DEV_OPERATOR_USER_ID` in `.env`, and it
+needs `make seed` to have run first — `DEV_TENANT_ID` comes out of the seeded `tenant` table.
 
 ### Closure rule (enforced by #31)
 
@@ -76,6 +86,10 @@ packages/dbt         staging  -> deduped, renamed, percentages normalised
                      marts    -> ACOS / ROAS / CTR / CVR / CPC / TACoS + break-even
         |
         v
+copilot.*            per-mart views with the tenant filter baked in; the only way the
+                     dashboard role and the copilot role can read marts at all
+        |
+        v
 services/rules       SQL-compiled JSONB rules -> rule_evaluation (every match, even blocked)
         |
         v
@@ -85,33 +99,40 @@ services/actions     pending -> approved -> applied -> verified | rolled_back
 Amazon write-back    dry-run by default, human approval, before_value re-read at apply time
 ```
 
-Two things in that chain are deliberate and easy to get wrong:
+Three things in that chain are deliberate and easy to get wrong:
 
 - **Every match is written to `rule_evaluation`, including blocked ones.** A rule that was
   silently skipped is indistinguishable from a rule that found nothing, unless you log both.
 - **`before_value` is re-read live at apply time.** If Amazon's current value no longer matches
   what the proposal was based on, the action FAILS with `drift:` rather than overwriting a
   human's change.
+- **The `marts` schema has no RLS.** That is safe for `services/rules`, which writes an explicit
+  `tenant_id` filter into every statement it generates, and unsafe for anything that might
+  forget — the dashboard and the copilot. Both are therefore denied `marts` entirely and read
+  `copilot.<mart>` views instead, where the filter cannot be removed (`0007`, `0008`).
 
 ---
 
 ## Repo layout
 
 ```
-apps/web/lib          db + format helpers (the dashboard itself is #15/#16)
+apps/web              Next.js 15 app router: Command Center, approvals queue,
+                      lib/ (db, queries, session, format, pg-types)
 services/ingest       clients/ (sp_api, ads_api), pipelines/ (ads_daily), security/
 services/rules        starter_rules, diagnostic_rules, rule_catalog,
                       compiler, query, guardrails, engine
 services/actions      state_machine
-packages/db           migrations/ (0001-0006) + down/, migrate.py, seed.py
+services/copilot      system_map (generated + self-checking), sql_guard (allowlist validator)
+packages/db           migrations/ (0001-0008) + down/, migrate.py, seed.py
 packages/dbt          staging + marts models, schema tests, sources
-packages/shared       marketplaces.py
+packages/shared       marketplaces.py, endpoints.py
 infra                 docker-compose.yml
 docs/adr              architecture decision records
-tests                 8 test files, none executed yet
+tests                 10 test files, none executed yet
 ```
 
-Not yet created: `apps/api`, `apps/mobile`, `services/copilot` (#33), `.github/workflows` (#35).
+Not yet created: `apps/api` (#34), `apps/mobile` (#24), `.github/workflows` (#34 — the PAT has
+no `Workflows: write`, so CI has to be added by hand).
 
 ---
 
@@ -142,6 +163,26 @@ change, it is the erasure of their decision.
 
 ---
 
+## Database roles
+
+Three roles, three blast radii. Nothing uses the owner connection except migrations and dbt.
+
+| Role | Used by | Can read `marts` | Can write |
+| --- | --- | --- | --- |
+| owner (`DATABASE_URL`) | `migrate.py`, dbt, seed | yes | yes |
+| `axaty_app` (`DATABASE_URL_APP`) | `apps/web`, services | no — `copilot.*` views only | yes, RLS-forced |
+| `axaty_copilot` (`DATABASE_URL_COPILOT`) | system copilot (#33) | no — `copilot.*` views only | no, `default_transaction_read_only = on` |
+
+`axaty_copilot` is `NOLOGIN`. Deployment creates a login user and grants it the role, so no
+password ever lands in a migration. `apps/web/lib/db.ts` refuses to start if `DATABASE_URL_APP`
+is missing or equal to `DATABASE_URL`.
+
+The `copilot.*` views are dropped and recreated by `copilot.refresh_views()`, which the dbt
+`on-run-end` hook calls after every build — dbt drops and rebuilds the mart tables underneath
+them, taking the views with it.
+
+---
+
 ## Hard constraints (read before coding)
 
 - **Ads API reports go back ~95 days only** (Sponsored Display and SB v2: 60 days). Un-ingested
@@ -162,6 +203,9 @@ change, it is the erasure of their decision.
 - **`sku_cost_ledger` gates the entire economics layer.** Without COGS, freight, FBA fee,
   storage and VAT, `break_even_acos` is NULL and profitability rules go quiet instead of
   failing loudly (#14).
+- **`pg` returns `numeric` and `int8` as JavaScript strings.** `apps/web/lib/pg-types.ts` fixes
+  this globally and is imported by `db.ts`; without it `"12.50" + "3.20"` is `"12.503.20"` and
+  the dashboard shows plausible, wrong money.
 
 ---
 
@@ -174,6 +218,8 @@ make migrate            # apply packages/db/migrations in order, with checksum l
 make seed               # dev tenants + the 11 rules, all disabled
 make test               # pytest
 make dbt                # dbt build
+
+cd apps/web && npm install && npm run dev    # dashboard on :3000
 ```
 
 `make help` lists every target. Postgres-backed tests skip silently without
@@ -190,6 +236,7 @@ make dbt                # dbt build
 | [003](docs/adr/003-migrations.md) | Hand-rolled Python migration runner with a checksum ledger |
 | [004](docs/adr/004-diagnostics.md) | Diagnostics live in `action` as `action_type='flag'`, not in a separate table |
 | [005](docs/adr/005-placement-scope.md) | Placement is a diagnosis-only scope until bidding config is ingested |
+| [006](docs/adr/006-system-copilot.md) | The copilot's system map is generated and test-enforced, never hand-written |
 
 ---
 
@@ -205,6 +252,6 @@ make dbt                # dbt build
 | M5 | Write-back (#22–#23, #32) | 20 actions applied, 0 unwanted change |
 | M6 | Mobile (#24) | Approve from phone and verify |
 | M7 | Hunting (#25–#26) | 10 candidates, 3 shortlisted |
-| M8 | Platform hardening (#33–#38) | Copilot answers from the live system; CI green |
+| M8 | Platform hardening (#33–#37) | Copilot answers from the live system; CI green |
 
 #31 is the standing audit issue: plan versus reality, updated whenever either changes.
