@@ -21,6 +21,7 @@
  */
 
 import { Pool, type PoolClient, type QueryResultRow } from "pg"
+import "./pg-types" // side effect: numeric/int8 come back as numbers
 
 /** Schema holding tenant-filtered views over the dbt marts. */
 export const MART_SCHEMA = "copilot"
