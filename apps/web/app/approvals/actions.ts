@@ -30,8 +30,8 @@ import { canApprove, currentTenantId, currentUserId } from "@/lib/session"
  * this?" would answer with the name of the person who refused it.
  */
 
-export class NotAuthorised extends Error {}
-export class NothingToDecide extends Error {}
+class NotAuthorised extends Error {}
+class NothingToDecide extends Error {}
 
 type Decision = "approved" | "rejected"
 
