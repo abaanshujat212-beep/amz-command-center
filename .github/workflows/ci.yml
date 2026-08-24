@@ -28,7 +28,7 @@ jobs:
         run: ruff check .
 
       - name: Pytest without database
-        run: pytest -q
+        run: pytest -q -m "not db"
 
   postgres-gate:
     name: Migration and Postgres-backed tests
