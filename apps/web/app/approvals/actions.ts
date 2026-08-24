@@ -19,6 +19,15 @@ import { canApprove, currentTenantId, currentUserId } from "@/lib/session"
  * Zero rows updated is a real answer, and the caller is told which of those
  * three reasons it was. "Nothing happened" with a green tick is how an operator
  * learns not to trust the queue.
+ *
+ * Attribution follows migration 0009:
+ *
+ *   decided_by / decided_at / decision   every decision, approve or reject
+ *   approved_by / approved_at            approvals only
+ *
+ * Keeping them separate is the whole point. If a rejection wrote approved_by,
+ * then "how many approvals?" would quietly include refusals and "who approved
+ * this?" would answer with the name of the person who refused it.
  */
 
 export class NotAuthorised extends Error {}
@@ -38,10 +47,14 @@ async function decide(actionId: string, decision: Decision): Promise<void> {
 	}
 
 	const tenantId = currentTenantId()
+	const isApproval = decision === "approved"
 
 	await withTenant(tenantId, async (c) => {
-		// approved_by is written for both outcomes today because the schema has no
-		// rejected_by. See the note on #22.
+		// $2 feeds both status and decision. That works only because the two
+		// vocabularies happen to share these two words right now (0003's status
+		// CHECK and 0009's decision CHECK). If either ever gains a value the other
+		// lacks, split this into two parameters -- the constraint violation would
+		// surface at the worst possible moment, mid-approval.
 		const rows = await query<{
 			id: string
 			entity_type: string
@@ -49,19 +62,23 @@ async function decide(actionId: string, decision: Decision): Promise<void> {
 			action_type: string
 			before_value: unknown
 			after_value: unknown
+			decided_at: string
 		}>(
 			c,
 			`update action
-			    set status = $2,
-			        approved_by = $3,
-			        approved_at = now()
+			    set status      = $2,
+			        decision    = $2,
+			        decided_by  = $3,
+			        decided_at  = now(),
+			        approved_by = case when $4::boolean then $3::uuid else approved_by end,
+			        approved_at = case when $4::boolean then now() else approved_at end
 			  where id = $1
 			    and status = 'pending'
 			    and expires_at > now()
 			    and action_type <> 'flag'
 			 returning id, entity_type, entity_id, action_type,
-			           before_value, after_value`,
-			[actionId, decision, userId],
+			           before_value, after_value, decided_at::text as decided_at`,
+			[actionId, decision, userId, isApproval],
 		)
 
 		if (rows.length === 0) {
@@ -105,6 +122,8 @@ async function decide(actionId: string, decision: Decision): Promise<void> {
 				JSON.stringify({ status: "pending", value: a.before_value }),
 				JSON.stringify({
 					status: decision,
+					decision,
+					decided_at: a.decided_at,
 					action_type: a.action_type,
 					value: a.after_value,
 				}),
@@ -116,6 +135,7 @@ async function decide(actionId: string, decision: Decision): Promise<void> {
 	// its own schedule, captures before_value live at that moment, and fails the
 	// action if the live value has drifted from what was shown here.
 	revalidatePath("/approvals")
+	revalidatePath("/history")
 }
 
 export async function approveAction(formData: FormData): Promise<void> {
