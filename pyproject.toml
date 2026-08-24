@@ -54,6 +54,8 @@ ignore = [
   "S101",   # asserts are fine in tests
   "S105",   # endpoint/token URL constants are not passwords
   "S106",   # endpoint/token URL keyword args are not passwords
+  "S311",   # jitter/backoff randomness is not cryptographic
+  "S608",   # SQL builders use allowlisted table/column names; tests also use f-strings deliberately
   "B904",   # fail() exits; follow-up unreachable raises only satisfies typing
   "UP017",  # keep datetime.timezone.utc while Python 3.11 is supported
   "UP035",  # defer broad typing modernization until after the CI gate is green
@@ -64,7 +66,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S105", "S106"]   # hardcoded local-dev passwords in fixtures
+"tests/*" = ["S105", "S106", "S608"]   # fixtures intentionally build SQL from allowlisted names
 
 [tool.mypy]
 python_version = "3.11"
