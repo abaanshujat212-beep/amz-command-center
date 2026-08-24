@@ -8,6 +8,7 @@ create extension if not exists "pgcrypto";
 create table if not exists tenant (
   id             uuid primary key default gen_random_uuid(),
   name           text        not null,
+  slug           text        not null unique,
   plan           text        not null default 'internal',
   status         text        not null default 'active'
                  check (status in ('active','suspended','archived')),
@@ -45,8 +46,6 @@ create table if not exists tenant_quota (
 );
 
 -- ------------------------------------------------------------ connections
--- authorization_expires_at is mandatory: SP-API seller authorization must be
--- re-confirmed every 12 months or Amazon suspends access silently.
 create table if not exists amazon_connection (
   id                       uuid primary key default gen_random_uuid(),
   tenant_id                uuid not null references tenant(id) on delete cascade,
@@ -93,7 +92,6 @@ create table if not exists selling_account (
   unique (tenant_id, selling_partner_id)
 );
 
--- --------------------------------------------------------------- pipeline
 create table if not exists sync_watermark (
   tenant_id          uuid not null references tenant(id) on delete cascade,
   dataset            text not null,
@@ -120,7 +118,6 @@ create table if not exists pipeline_run (
 create index if not exists idx_pipeline_run_tenant_started
   on pipeline_run (tenant_id, started_at desc);
 
--- ------------------------------------------------------------------ audit
 create table if not exists audit_log (
   id             uuid primary key default gen_random_uuid(),
   tenant_id      uuid not null references tenant(id) on delete cascade,
