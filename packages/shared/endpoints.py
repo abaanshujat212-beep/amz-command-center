@@ -299,12 +299,19 @@ ENDPOINTS: dict[str, Endpoint] = dict(
 #
 # The lookback is not a preference, it is a hard wall. Un-ingested days past it
 # are gone permanently, for everyone, forever.
+#
+# This is the ONLY copy. services/ingest/clients/ads_api.py used to keep a second
+# one, and within days the copy was more complete than this catalog — it knew
+# about spAdGroups and sbV3 while this file did not. The client now imports from
+# here, so a missing kind raises instead of two files disagreeing quietly.
 ADS_REPORT_LOOKBACK_DAYS: dict[str, int] = {
     "spCampaigns": 95,
+    "spAdGroups": 95,
     "spTargeting": 95,
     "spSearchTerm": 95,
     "spAdvertisedProduct": 95,
     "spPurchasedProduct": 95,
+    "sbV3": 95,
     "sbBenchmark": 90,
     "sbV2": 60,
     "sdCampaigns": 60,
@@ -318,6 +325,10 @@ SP_REPORT_TYPES: dict[str, str] = {
     "GET_BRAND_ANALYTICS_SEARCH_CATALOG_PERFORMANCE_REPORT": "Per-ASIN search funnel.",
     "GET_COUPON_PERFORMANCE_REPORT": "Coupon spend, for true promotional cost.",
 }
+
+# SP-API report history is bounded too, and by a different rule: dataStartTime
+# may go back ~2 years. Kept here so no client hardcodes it.
+SP_MAX_REPORT_HISTORY_DAYS = 730
 
 
 # --- action_type -> the endpoint that would carry it out -------------------
@@ -373,6 +384,14 @@ class UnknownEndpoint(KeyError):
     pass
 
 
+class UnknownReportKind(KeyError):
+    """Raised instead of defaulting a lookback window.
+
+    A default here would be the worst kind of wrong: the request succeeds, the
+    window is shorter than it should be, and the missing days expire.
+    """
+
+
 def endpoint(key: str) -> Endpoint:
     try:
         return ENDPOINTS[key]
@@ -380,6 +399,19 @@ def endpoint(key: str) -> Endpoint:
         raise UnknownEndpoint(
             f"'{key}' is not in the endpoint catalog. Add it to "
             f"packages/shared/endpoints.py rather than hardcoding a path."
+        ) from None
+
+
+def lookback_days(report_kind: str) -> int:
+    """The hard wall for one Ads report kind. Never guesses."""
+    try:
+        return ADS_REPORT_LOOKBACK_DAYS[report_kind]
+    except KeyError:
+        raise UnknownReportKind(
+            f"'{report_kind}' has no known lookback window. Add it to "
+            f"ADS_REPORT_LOOKBACK_DAYS in packages/shared/endpoints.py — do not "
+            f"assume 95 days, because assuming too much silently loses the days "
+            f"beyond the real wall."
         ) from None
 
 
