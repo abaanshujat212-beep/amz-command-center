@@ -1,10 +1,9 @@
 version: 2
 
 sources:
-  # Landed by dlt from the Amazon APIs. Never edited by hand.
   - name: raw
     schema: raw
-    description: dlt landing zone. Append-only; loaded_at drives deduplication.
+    description: Raw Amazon landing zone. loaded_at drives deduplication.
     freshness:
       warn_after: {count: 36, period: hour}
       error_after: {count: 72, period: hour}
@@ -12,19 +11,16 @@ sources:
     tables:
       - name: raw_ads_sp_campaign_daily
       - name: raw_ads_sp_placement_daily
-        description: >
-          The campaign report requested with a placement groupBy. Same source
-          report as raw_ads_sp_campaign_daily at a finer grain -- keep them
-          separate, never additive.
+        description: Campaign report requested at placement grain; never additive with campaign grain.
+      - name: raw_ads_sp_ad_group_daily
       - name: raw_ads_sp_keyword_daily
       - name: raw_ads_sp_search_term_daily
       - name: raw_ads_advertised_product_daily
+      - name: raw_ads_sp_purchased_product_daily
       - name: raw_ads_negative_keywords
-        # Configuration state, not a daily report -- no freshness expectation.
         freshness: null
       - name: raw_sales_traffic_asin_daily
 
-  # Application tables. Read-only from dbt's point of view.
   - name: app
     schema: public
     tables:
