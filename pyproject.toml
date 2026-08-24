@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "axaty-command-center"
 version = "0.1.0"
@@ -26,6 +30,10 @@ dev = [
   "ruff>=0.5",
   "mypy>=1.10",
 ]
+
+[tool.setuptools.packages.find]
+include = ["packages*", "services*"]
+exclude = ["apps*", "infra*", "tests*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
