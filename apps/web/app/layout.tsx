@@ -76,8 +76,14 @@ export default function RootLayout({
 							<Link href="/" className="hover:underline">
 								Command Center
 							</Link>
+							<Link href="/search-terms" className="hover:underline">
+								Search terms
+							</Link>
 							<Link href="/approvals" className="hover:underline">
 								Approvals
+							</Link>
+							<Link href="/history" className="hover:underline">
+								History
 							</Link>
 						</nav>
 						<StatusBar />

@@ -1,17 +1,16 @@
 import Link from "next/link"
 import { withTenant } from "@/lib/db"
-import { acosTone, money, percent, reportDate } from "@/lib/format"
+import { acosTone, count, money, percent, reportDate } from "@/lib/format"
 import {
 	accountTotals,
 	campaignPerformance,
 	openFindings,
 	type CampaignRow,
 } from "@/lib/queries"
+import { ALLOWED_WINDOWS, parseDays, windowHref, type Window } from "@/lib/range"
 import { currentTenantId } from "@/lib/session"
 
 export const dynamic = "force-dynamic"
-
-const WINDOW_DAYS = 30
 
 function Kpi({
 	label,
@@ -33,6 +32,26 @@ function Kpi({
 	)
 }
 
+function WindowPicker({ days }: { days: Window }) {
+	return (
+		<div className="flex gap-1 text-xs">
+			{ALLOWED_WINDOWS.map((d) => (
+				<Link
+					key={d}
+					href={windowHref("/", d)}
+					className={
+						d === days
+							? "rounded bg-slate-900 px-2 py-1 text-white"
+							: "rounded border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-100"
+					}
+				>
+					{d}d
+				</Link>
+			))}
+		</div>
+	)
+}
+
 function AcosCell({ row }: { row: CampaignRow }) {
 	const tone = acosTone(row.acos, row.break_even_acos)
 	return (
@@ -50,14 +69,20 @@ function AcosCell({ row }: { row: CampaignRow }) {
 	)
 }
 
-export default async function CommandCenter() {
+export default async function CommandCenter({
+	searchParams,
+}: {
+	searchParams: Promise<{ days?: string }>
+}) {
+	const sp = await searchParams
+	const days = parseDays(sp.days)
 	const tenantId = currentTenantId()
 
 	const { totals, campaigns, findings } = await withTenant(
 		tenantId,
 		async (c) => ({
-			totals: await accountTotals(c, WINDOW_DAYS),
-			campaigns: await campaignPerformance(c, WINDOW_DAYS),
+			totals: await accountTotals(c, days),
+			campaigns: await campaignPerformance(c, days),
 			findings: await openFindings(c, 20),
 		}),
 	)
@@ -84,13 +109,16 @@ export default async function CommandCenter() {
 	return (
 		<div className="space-y-8">
 			<section>
-				<div className="mb-3 flex items-baseline justify-between">
+				<div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
 					<h1 className="text-lg font-semibold">PPC Command Center</h1>
-					<span className="text-xs text-slate-500">
-						last {WINDOW_DAYS} settled days
-						{totals?.data_through &&
-							` \u00b7 through ${reportDate(totals.data_through)}`}
-					</span>
+					<div className="flex items-center gap-3">
+						<span className="text-xs text-slate-500">
+							last {days} settled days
+							{totals?.data_through &&
+								` \u00b7 through ${reportDate(totals.data_through)}`}
+						</span>
+						<WindowPicker days={days} />
+					</div>
 				</div>
 				<div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 					<Kpi label="Ad spend" value={money(totals?.cost ?? 0)} />
@@ -103,7 +131,7 @@ export default async function CommandCenter() {
 					<Kpi
 						label="Campaigns"
 						value={String(totals?.campaigns ?? 0)}
-						note={`${totals?.orders ?? 0} orders`}
+						note={`${count(totals?.orders ?? 0)} orders`}
 					/>
 				</div>
 			</section>
@@ -130,7 +158,12 @@ export default async function CommandCenter() {
 								className="border-b border-slate-100 hover:bg-slate-50"
 							>
 								<td className="px-3 py-2">
-									<div className="font-medium">{row.campaign_name}</div>
+									<Link
+										href={`/campaigns/${encodeURIComponent(row.campaign_id)}?days=${days}`}
+										className="font-medium text-blue-700 hover:underline"
+									>
+										{row.campaign_name}
+									</Link>
 									<div className="text-xs text-slate-500">
 										{row.campaign_status ?? "unknown"}
 										{row.targeting_type ? ` \u00b7 ${row.targeting_type}` : ""}
@@ -161,7 +194,7 @@ export default async function CommandCenter() {
 				<p className="mt-2 text-xs text-slate-500">
 					ACOS is coloured against each campaign&rsquo;s own break-even, not a
 					fixed target. A dash means the metric cannot be computed &mdash; never
-					zero.
+					zero. Click a campaign for its keywords.
 				</p>
 			</section>
 
@@ -191,12 +224,23 @@ export default async function CommandCenter() {
 						))}
 					</ul>
 				)}
-				<Link
-					href="/approvals"
-					className="mt-4 inline-block text-sm text-blue-700 hover:underline"
-				>
-					Go to the approval queue &rarr;
-				</Link>
+				<div className="mt-4 flex gap-4 text-sm">
+					<Link href="/approvals" className="text-blue-700 hover:underline">
+						Approval queue &rarr;
+					</Link>
+					<Link
+						href={`/search-terms?days=${days}`}
+						className="text-blue-700 hover:underline"
+					>
+						Search terms &rarr;
+					</Link>
+					<Link
+						href={`/history?days=${days}`}
+						className="text-blue-700 hover:underline"
+					>
+						Decision history &rarr;
+					</Link>
+				</div>
 			</section>
 		</div>
 	)
