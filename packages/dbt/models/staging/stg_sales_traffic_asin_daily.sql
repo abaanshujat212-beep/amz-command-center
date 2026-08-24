@@ -1,57 +1,29 @@
--- Staging: SP-API Sales & Traffic report at CHILD ASIN granularity.
---
--- This is the denominator for TACoS: total business sales, not just ad sales.
--- It is also where avg_price comes from for unit economics.
---
--- CHILD granularity matters. A parent ASIN rolls up variations that can have
--- different prices and costs, which would silently produce a wrong break-even
--- ACOS for every rule downstream.
-
 with source as (
-
     select * from {{ source('raw', 'raw_sales_traffic_asin_daily') }}
-
-),
-
-ranked as (
-
-    select
-        *,
-        row_number() over (
-            partition by tenant_id, report_date, child_asin
-            order by loaded_at desc
-        ) as _rn
+), ranked as (
+    select *, row_number() over (partition by tenant_id, report_date, entity_id order by loaded_at desc) as _rn
     from source
-
 )
-
 select
-    tenant_id::uuid                             as tenant_id,
-    report_date::date                           as report_date,
-    child_asin::text                            as asin,
-    parent_asin::text                           as parent_asin,
-    sku::text                                   as sku,
-
-    coalesce(units_ordered, 0)::bigint           as units_ordered,
-    coalesce(ordered_product_sales, 0)::numeric(18,4) as ordered_product_sales,
-    coalesce(total_order_items, 0)::bigint       as total_order_items,
-    coalesce(sessions, 0)::bigint                as sessions,
-    coalesce(page_views, 0)::bigint              as page_views,
-
-    -- Amazon sends these as percentages; normalise to fractions like everywhere
-    -- else in the project.
-    case when buy_box_percentage is null then null
-         else buy_box_percentage::numeric / 100.0 end as buy_box_pct,
-    case when unit_session_percentage is null then null
-         else unit_session_percentage::numeric / 100.0 end as unit_session_pct,
-
-    -- Average selling price, VAT-inclusive (it is what the customer paid).
-    -- mart_sku_economics divides this by (1 + vat_rate) before margin maths.
-    case when coalesce(units_ordered, 0) > 0
-         then ordered_product_sales::numeric / units_ordered
-    end                                          as avg_price_gross,
-
+    tenant_id::uuid as tenant_id,
+    report_date::date as report_date,
+    coalesce(record->>'child_asin', record->>'childAsin', record->>'asin', entity_id)::text as asin,
+    coalesce(record->>'parent_asin', record->>'parentAsin')::text as parent_asin,
+    coalesce(record->>'sku', record->>'sellerSku')::text as sku,
+    coalesce((coalesce(record->>'units_ordered', record->>'unitsOrdered'))::bigint, 0) as units_ordered,
+    coalesce((coalesce(record->>'ordered_product_sales', record->>'orderedProductSales'))::numeric(18,4), 0) as ordered_product_sales,
+    coalesce((coalesce(record->>'total_order_items', record->>'totalOrderItems'))::bigint, 0) as total_order_items,
+    coalesce((record->>'sessions')::bigint, 0) as sessions,
+    coalesce((coalesce(record->>'page_views', record->>'pageViews'))::bigint, 0) as page_views,
+    case when coalesce(record->>'buy_box_percentage', record->>'buyBoxPercentage') is null then null
+         else (coalesce(record->>'buy_box_percentage', record->>'buyBoxPercentage'))::numeric / 100.0 end as buy_box_pct,
+    case when coalesce(record->>'unit_session_percentage', record->>'unitSessionPercentage') is null then null
+         else (coalesce(record->>'unit_session_percentage', record->>'unitSessionPercentage'))::numeric / 100.0 end as unit_session_pct,
+    case when coalesce((coalesce(record->>'units_ordered', record->>'unitsOrdered'))::bigint, 0) > 0
+         then (coalesce(record->>'ordered_product_sales', record->>'orderedProductSales'))::numeric
+              / (coalesce(record->>'units_ordered', record->>'unitsOrdered'))::numeric
+    end as avg_price_gross,
     loaded_at
 from ranked
 where _rn = 1
-  and child_asin is not null
+  and coalesce(record->>'child_asin', record->>'childAsin', record->>'asin', entity_id) is not null
