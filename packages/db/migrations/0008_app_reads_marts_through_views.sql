@@ -17,6 +17,11 @@
 -- connecting with DATABASE_URL, the owner role, instead of DATABASE_URL_APP.
 -- That is fixed in the same change as this migration.
 
+-- CI/local migrations can run before dbt has created the marts schema. Create it
+-- empty so the explicit revoke and refresh function are safe; dbt later creates
+-- the actual mart tables and calls copilot.refresh_views() on-run-end.
+create schema if not exists marts;
+
 grant usage on schema copilot to axaty_app;
 
 -- Belt and braces: make the direct path explicitly closed, so that a future
