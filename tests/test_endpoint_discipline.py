@@ -56,38 +56,25 @@ def test_no_client_builds_an_uncatalogued_path():
 
 
 def test_lookback_windows_live_in_exactly_one_place():
-    """ads_api.py used to keep its own LOOKBACK_DAYS, and within days the copy
-    knew about spAdGroups and sbV3 while the catalog did not."""
-    assert not hasattr(ads_api, "LOOKBACK_DAYS"), (
-        "second lookback table is back in the Ads client"
-    )
+    assert not hasattr(ads_api, "LOOKBACK_DAYS"), "second lookback table is back"
 
 
 def test_rate_limits_live_in_exactly_one_place():
-    """rate_limit.py used to keep SPAPI_LIMITS and ADS_LIMITS keyed by invented
-    operation names that matched no other identifier, so nothing could
-    cross-check them — and they had already drifted."""
     assert not hasattr(rate_limit, "SPAPI_LIMITS")
     assert not hasattr(rate_limit, "ADS_LIMITS")
 
 
 def test_every_pipeline_dataset_has_a_known_lookback():
-    """The bug this file was written after: DATASETS requested spAdGroups and the
-    catalog had no window for it."""
     for name, spec in DATASETS.items():
         assert ep.lookback_days(spec.kind) > 0, name
 
 
 def test_unknown_report_kind_raises_instead_of_defaulting():
-    """A default would be the dangerous kind of wrong: the request succeeds with a
-    shorter window than intended, and the missing days expire forever."""
     with pytest.raises(ep.UnknownReportKind):
         ep.lookback_days("spSomethingNew")
 
 
 def test_campaign_and_placement_datasets_share_a_kind_but_not_a_grain():
-    """They differ by groupBy alone. Summing them double-counts spend and halves
-    every ACOS."""
     campaign = DATASETS["ads_sp_campaign_daily"]
     placement = DATASETS["ads_sp_placement_daily"]
     assert campaign.kind == placement.kind
@@ -102,9 +89,6 @@ def test_ads_client_refuses_a_window_amazon_will_not_serve():
     today = dt.date.today()
     with pytest.raises(ads_api.LookbackExceeded):
         ads_api.AdsClient.check_lookback("sdCampaigns", today - dt.timedelta(days=61))
-    # Same date is fine for Sponsored Products, whose wall is ~95 days. The
-    # windows are genuinely different per report kind, which is why one shared
-    # constant would be wrong.
     ads_api.AdsClient.check_lookback("spCampaigns", today - dt.timedelta(days=61))
 
 
@@ -114,7 +98,6 @@ def test_sp_client_refuses_history_beyond_two_years():
 
 
 def test_report_request_without_a_grain_is_refused():
-    """groupBy decides the grain, and the wrong grain is worse than no rows."""
     today = dt.date.today()
     with pytest.raises(ValueError) as exc:
         ads_client().create_report(
@@ -124,8 +107,6 @@ def test_report_request_without_a_grain_is_refused():
 
 
 def test_sales_and_traffic_must_be_requested_at_child_granularity():
-    """PARENT is accepted by Amazon and returns good-looking data that cannot be
-    joined to the Ads advertisedAsin, which makes TACoS a confident wrong number."""
     today = dt.date.today()
     start, end = today - dt.timedelta(days=5), today - dt.timedelta(days=1)
     with pytest.raises(sp_api.AttributionGranularityError):
@@ -137,9 +118,6 @@ def test_sales_and_traffic_must_be_requested_at_child_granularity():
         )
     with pytest.raises(sp_api.AttributionGranularityError):
         sp_client().create_report(sp_api.SALES_AND_TRAFFIC, start, end, None)
-    # Correct options get past validation and stop only at the unimplemented
-    # HTTP layer — which is what proves the refusal above is about granularity
-    # and not about the request failing anyway.
     with pytest.raises(NotImplementedError):
         sp_client().create_report(
             sp_api.SALES_AND_TRAFFIC,
@@ -150,8 +128,6 @@ def test_sales_and_traffic_must_be_requested_at_child_granularity():
 
 
 def test_unknown_sp_report_type_is_refused_before_dispatch():
-    """sp.reports.create allows one request per 45 seconds. Learning about a typo
-    from Amazon's response is the slowest possible way to find it."""
     today = dt.date.today()
     with pytest.raises(sp_api.UnknownReportType):
         sp_client().create_report(
@@ -170,28 +146,30 @@ def test_a_read_endpoint_cannot_be_used_to_write():
 
 
 def test_every_action_endpoint_is_declared_mutating():
-    """An action pointed at a read endpoint would be approved by a human and then
-    fail (or worse, succeed against something else)."""
     for action_type, by_scope in ep.ACTION_ENDPOINTS.items():
         for scope, key in by_scope.items():
             assert ep.endpoint(key).mutates is True, f"{action_type}/{scope} -> {key}"
 
 
 def test_dry_run_never_reaches_the_dispatch_layer():
-    """Dry run must be a real short-circuit, not a flag the HTTP layer inspects."""
     result = ads_client().update_bid("kw-1", 1.25, dry_run=True)
     assert result["status"] == "WOULD_DO"
 
 
-def test_a_real_bid_update_goes_through_the_catalog():
-    with pytest.raises(NotImplementedError):
-        ads_client().update_bid("kw-1", 1.25, dry_run=False)
+def test_a_real_bid_update_goes_through_the_catalog(monkeypatch):
+    calls = []
+    client = ads_client()
+
+    def fake_call(endpoint_key, *, body):
+        calls.append((endpoint_key, body))
+        return {"ok": True}
+
+    monkeypatch.setattr(client, "_call_mutating", fake_call)
+    assert client.update_bid("kw-1", 1.25, dry_run=False) == {"ok": True}
+    assert calls == [("ads.keywords.update", {"keywords": [{"keywordId": "kw-1", "bid": 1.25}]})]
 
 
 def test_placement_modifier_refuses_without_the_current_value():
-    """A modifier is a percentage on top of whatever is already set, and nothing
-    ingests the existing value yet (#32). Assuming 0% wipes a seller's manual
-    setting while reporting success."""
     with pytest.raises(ValueError):
         ads_client().update_placement_modifier(
             "camp-1", "PLACEMENT_TOP", 30.0, current_percentage=None
@@ -199,8 +177,6 @@ def test_placement_modifier_refuses_without_the_current_value():
 
 
 def test_off_amazon_placement_cannot_be_adjusted():
-    """Off-Amazon traffic appears in reports but has no bid multiplier, so it can
-    be diagnosed and never adjusted (ADR 005)."""
     with pytest.raises(ValueError):
         ads_client().update_placement_modifier(
             "camp-1", "OFF_AMAZON", 30.0, current_percentage=0.0
@@ -217,30 +193,23 @@ def test_published_sp_limits_become_buckets_from_the_catalog():
 
 
 def test_ads_endpoints_have_no_invented_rate_limit():
-    """Amazon does not publish Ads rate limits. A constant here would look like
-    deliberate pacing while still being throttled, and would make Retry-After
-    look like an anomaly instead of the contract."""
     for endpoint in ep.for_api(ep.Api.ADS):
         assert endpoint.rate_limit_rps is None, endpoint.key
         assert rate_limit.limiter_for(endpoint.key) is None
 
 
 def test_limiter_for_an_unknown_endpoint_raises():
-    """None means 'no published limit'. A typo must not borrow that meaning and
-    read as 'unlimited'."""
     with pytest.raises(ep.UnknownEndpoint):
         rate_limit.limiter_for("ads.keywords.updte")
 
 
 def test_one_bucket_per_endpoint_is_shared():
-    """Two buckets for one endpoint is twice the rate."""
     assert rate_limit.limiter_for("sp.reports.get") is rate_limit.limiter_for(
         "sp.reports.get"
     )
 
 
 def test_report_creation_is_not_blindly_retryable():
-    """Each retry consumes a scarce slot and may queue a duplicate report."""
     assert "sp.reports.create" in rate_limit.NON_RETRYABLE_ENDPOINTS
     assert "ads.reports.create" in rate_limit.NON_RETRYABLE_ENDPOINTS
 
@@ -254,8 +223,6 @@ def test_retry_after_beats_backoff():
 
 
 def test_urls_follow_the_client_region():
-    """A right path on the wrong regional host is a 403 that reads like a
-    permissions problem."""
     assert ads_client("eu").url("ads.profiles.list").startswith(
         "https://advertising-api-eu.amazon.com"
     )
@@ -268,7 +235,6 @@ def test_urls_follow_the_client_region():
 
 
 def test_ads_token_url_is_regional_but_sp_token_url_is_not():
-    """A real difference between the two APIs, and an easy silent 401."""
     assert ads_client("eu").token_url == "https://api.amazon.co.uk/auth/o2/token"
     assert ads_client("na").token_url == "https://api.amazon.com/auth/o2/token"
     assert sp_client("eu").token_url == sp_client("na").token_url
