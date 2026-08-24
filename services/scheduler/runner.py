@@ -88,9 +88,11 @@ def run_pipeline_cycle(
     tenant_id: str,
     *,
     dry_run: bool = True,
+    run_ads: Callable[..., object] = ads_daily.run,
+    run_sales: Callable[..., object] = sales_traffic.run,
     run_rules: Callable[..., object] = run_rules_once,
 ) -> list[object]:
-    results = run_ingestion(tenant_id, dry_run=dry_run)
+    results = run_ingestion(tenant_id, dry_run=dry_run, run_ads=run_ads, run_sales=run_sales)
     results.append(run_rules(tenant_id))
     return results
 

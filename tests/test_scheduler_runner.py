@@ -48,8 +48,16 @@ def test_run_ingestion_invokes_ads_and_sales_jobs():
     assert calls == [("ads", "tenant-1", True), ("sales", "tenant-1", True)]
 
 
-def test_run_pipeline_cycle_invokes_rules_after_ingestion():
+def test_run_pipeline_cycle_invokes_ingestion_then_rules():
     calls = []
+
+    def ads(tenant_id, dry_run=True):
+        calls.append(("ads", tenant_id, dry_run))
+        return SimpleNamespace(name="ads")
+
+    def sales(tenant_id, dry_run=True):
+        calls.append(("sales", tenant_id, dry_run))
+        return SimpleNamespace(name="sales")
 
     def rules(tenant_id):
         calls.append(("rules", tenant_id))
@@ -58,7 +66,9 @@ def test_run_pipeline_cycle_invokes_rules_after_ingestion():
     result = run_pipeline_cycle(
         "tenant-1",
         dry_run=True,
+        run_ads=ads,
+        run_sales=sales,
         run_rules=rules,
     )
-    assert result[-1].name == "rules"
-    assert calls == [("rules", "tenant-1")]
+    assert [r.name for r in result] == ["ads", "sales", "rules"]
+    assert calls == [("ads", "tenant-1", True), ("sales", "tenant-1", True), ("rules", "tenant-1")]
