@@ -58,22 +58,12 @@ comment on column llm_call.cost_usd is
 comment on column llm_call.fallback_from is
   'Provider this attempt fell back from after a 429/5xx. Never set for a refusal.';
 
--- RULE 1, in SQL rather than in a docstring: a refusal is never retried
--- elsewhere.
---
--- Shopping a refused request from provider to provider until one complies is the
--- single worst behaviour this gateway could have. It would turn a safety
--- boundary into a latency problem. The gateway is written not to do it; this
--- constraint means it cannot even record having done it.
 alter table llm_call
   drop constraint if exists llm_call_refusal_is_never_shopped;
 alter table llm_call
   add constraint llm_call_refusal_is_never_shopped
   check (not (status = 'refused' and fallback_from is not null));
 
--- RULE 2: a call that was blocked by the budget must have cost nothing.
--- Otherwise 'budget_exceeded' rows could carry spend, which would mean the check
--- ran after the money was gone -- while still looking like the check worked.
 alter table llm_call
   drop constraint if exists llm_call_blocked_calls_cost_nothing;
 alter table llm_call
@@ -83,9 +73,6 @@ alter table llm_call
     or (coalesce(cost_usd, 0) = 0 and coalesce(total_tokens, 0) = 0)
   );
 
--- Tenant isolation, same shape as 0002. force applies the policy to the table
--- owner as well, so a forgotten set_tenant() returns nothing instead of
--- everything.
 alter table llm_call enable row level security;
 alter table llm_call force row level security;
 
@@ -94,19 +81,12 @@ create policy tenant_isolation on llm_call
   using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
--- Budget reads are the hot path: checked before every dispatch.
+-- Budget reads filter by tenant and a started_at lower bound. Do not use a
+-- date_trunc(timestamptz) expression index here: Postgres rejects it because the
+-- expression depends on timezone settings and is not immutable.
 create index if not exists idx_llm_call_tenant_started
   on llm_call (tenant_id, started_at desc);
 
-create index if not exists idx_llm_call_tenant_month
-  on llm_call (tenant_id, date_trunc('month', started_at));
-
--- Current-month spend, for the pre-dispatch budget check.
---
--- A view so the definition of "this month's spend" exists once. Failed and
--- refused attempts are counted: a provider that charges for a refusal still
--- charged, and excluding them would let a loop of failures spend without ever
--- appearing against the budget.
 create or replace view v_llm_spend_this_month as
 select
     tenant_id,
@@ -122,8 +102,5 @@ group by tenant_id, currency;
 comment on view v_llm_spend_this_month is
   'Spend so far this calendar month. Read before dispatch, never after.';
 
--- The app writes and reads these rows. The copilot deliberately gets nothing:
--- it has no business reading its own cost ledger, and sql_guard does not
--- allowlist the table either, so both layers agree.
 grant select, insert on llm_call to axaty_app;
 grant select on v_llm_spend_this_month to axaty_app;

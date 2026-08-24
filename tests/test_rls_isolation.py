@@ -12,6 +12,8 @@ import uuid
 import psycopg
 import pytest
 
+pytestmark = pytest.mark.db
+
 ADMIN_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 APP_URL = os.environ.get("DATABASE_URL_APP", "postgresql://axaty_app:axaty_app@localhost:5432/axaty")
 
@@ -33,7 +35,7 @@ def tenants():
     a, b = uuid.uuid4(), uuid.uuid4()
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
         for tid, name in ((a, "tenant-a"), (b, "tenant-b")):
-            conn.execute("insert into tenant (id, name) values (%s, %s)", (tid, name))
+            conn.execute("insert into tenant (id, name, slug) values (%s, %s, %s)", (tid, name, name))
             conn.execute("insert into tenant_settings (tenant_id) values (%s)", (tid,))
             conn.execute(
                 "insert into tenant_member (tenant_id, user_id, role) values (%s, %s, 'owner')",

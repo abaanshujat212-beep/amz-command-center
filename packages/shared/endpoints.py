@@ -16,7 +16,7 @@ safe to import from tests, from the copilot, and from a cold process.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -93,217 +93,29 @@ def _e(*args, **kwargs) -> tuple[str, Endpoint]:
 
 ENDPOINTS: dict[str, Endpoint] = dict(
     [
-        # --- SP-API: reports -------------------------------------------------
-        _e(
-            "sp.reports.create",
-            Api.SP_API,
-            "POST",
-            "/reports/2021-06-30/reports",
-            "Request a report; returns a reportId, not data.",
-            rate_limit_rps=0.0222,
-            burst=10,
-            notes="0.0222 rps is one request per 45s. Batch report requests, never loop.",
-        ),
-        _e(
-            "sp.reports.get",
-            Api.SP_API,
-            "GET",
-            "/reports/2021-06-30/reports/{reportId}",
-            "Poll report status until DONE.",
-            rate_limit_rps=2.0,
-            burst=15,
-        ),
-        _e(
-            "sp.reports.document",
-            Api.SP_API,
-            "GET",
-            "/reports/2021-06-30/documents/{reportDocumentId}",
-            "Get the (usually gzipped) document URL for a finished report.",
-            rate_limit_rps=0.0167,
-            burst=15,
-            notes="The returned URL is short-lived. Download immediately, do not persist it.",
-        ),
-        # --- SP-API: other ---------------------------------------------------
-        _e(
-            "sp.orders.list",
-            Api.SP_API,
-            "GET",
-            "/orders/v0/orders",
-            "Orders, for reconciliation against ad-attributed sales.",
-            rate_limit_rps=0.0167,
-            burst=20,
-        ),
-        _e(
-            "sp.catalog.item",
-            Api.SP_API,
-            "GET",
-            "/catalog/2022-04-01/items/{asin}",
-            "Catalog attributes for an ASIN.",
-            rate_limit_rps=5.0,
-            burst=40,
-        ),
-        _e(
-            "sp.inventory.summaries",
-            Api.SP_API,
-            "GET",
-            "/fba/inventory/v1/summaries",
-            "FBA inventory; needed before recommending a budget increase.",
-            rate_limit_rps=2.0,
-            burst=30,
-            notes="Scaling spend on an out-of-stock ASIN is the most expensive avoidable mistake.",
-        ),
-        _e(
-            "sp.finances.events",
-            Api.SP_API,
-            "GET",
-            "/finances/v0/financialEvents",
-            "Fees and settlements, to validate the cost ledger against reality.",
-            rate_limit_rps=0.5,
-            burst=30,
-        ),
-        _e(
-            "sp.tokens.rdt",
-            Api.SP_API,
-            "POST",
-            "/tokens/2021-03-01/restrictedDataToken",
-            "Restricted Data Token, required before reading any PII.",
-            rate_limit_rps=1.0,
-            burst=10,
-            notes="We avoid PII entirely for now, so this should stay unused. If it starts "
-            "being called, that is a scope change and needs a DPA review.",
-        ),
-        # --- Ads API: reporting v3 ------------------------------------------
-        _e(
-            "ads.reports.create",
-            Api.ADS,
-            "POST",
-            "/reporting/reports",
-            "Request an async v3 report.",
-            scope="advertising::campaign_management",
-            notes="Body carries reportTypeId, groupBy, columns and the date window. "
-            "groupBy is what distinguishes campaign grain from placement grain.",
-        ),
-        _e(
-            "ads.reports.get",
-            Api.ADS,
-            "GET",
-            "/reporting/reports/{reportId}",
-            "Poll report status; SUCCESS returns a download URL.",
-            scope="advertising::campaign_management",
-            notes="v2 returned a 307 to an S3 link expiring in ~30s. Download in the same breath.",
-        ),
-        # --- Ads API: account -----------------------------------------------
-        _e(
-            "ads.profiles.list",
-            Api.ADS,
-            "GET",
-            "/v2/profiles",
-            "Advertiser profiles; the profileId scopes every other Ads call.",
-            scope="advertising::campaign_management",
-            notes="One LWA app can see many advertisers. Sending the wrong profileId edits "
-            "the wrong client's account, and the API will happily accept it.",
-        ),
-        # --- Ads API: read -----------------------------------------------
-        _e(
-            "ads.campaigns.list",
-            Api.ADS,
-            "POST",
-            "/sp/campaigns/list",
-            "List Sponsored Products campaigns, including dynamicBidding config.",
-            scope="advertising::campaign_management",
-            notes="This is where placement bid adjustments live. Needed by #32; until it is "
-            "ingested, placement_modifier_pct stays NULL by design.",
-        ),
-        _e(
-            "ads.adGroups.list",
-            Api.ADS,
-            "POST",
-            "/sp/adGroups/list",
-            "List ad groups.",
-            scope="advertising::campaign_management",
-        ),
-        _e(
-            "ads.keywords.list",
-            Api.ADS,
-            "POST",
-            "/sp/keywords/list",
-            "List keywords with current bids.",
-            scope="advertising::campaign_management",
-            notes="Used to re-read before_value at apply time, so a human's manual change "
-            "is detected as drift instead of being silently overwritten.",
-        ),
-        # --- Ads API: mutating ----------------------------------------------
-        _e(
-            "ads.campaigns.update",
-            Api.ADS,
-            "PUT",
-            "/sp/campaigns",
-            "Update campaign budget, state, or placement bid adjustments.",
-            mutates=True,
-            scope="advertising::campaign_management",
-            notes="There is no separate placement endpoint: placement modifiers are a field "
-            "on the campaign (dynamicBidding.placementBidding). See ADR 005.",
-        ),
-        _e(
-            "ads.adGroups.update",
-            Api.ADS,
-            "PUT",
-            "/sp/adGroups",
-            "Update ad group state or default bid.",
-            mutates=True,
-            scope="advertising::campaign_management",
-        ),
-        _e(
-            "ads.keywords.update",
-            Api.ADS,
-            "PUT",
-            "/sp/keywords",
-            "Update keyword bid or state.",
-            mutates=True,
-            scope="advertising::campaign_management",
-        ),
-        _e(
-            "ads.keywords.create",
-            Api.ADS,
-            "POST",
-            "/sp/keywords",
-            "Create keywords (search-term harvesting).",
-            mutates=True,
-            scope="advertising::campaign_management",
-        ),
-        _e(
-            "ads.targets.update",
-            Api.ADS,
-            "PUT",
-            "/sp/targets",
-            "Update product/auto targeting expressions.",
-            mutates=True,
-            scope="advertising::campaign_management",
-        ),
-        _e(
-            "ads.negativeKeywords.create",
-            Api.ADS,
-            "POST",
-            "/sp/negativeKeywords",
-            "Add negative exact / negative phrase keywords.",
-            mutates=True,
-            scope="advertising::campaign_management",
-            notes="Cheapest irreversible-feeling action: easy to add, easy to forget, and it "
-            "suppresses traffic silently. Always logged with the search term that caused it.",
-        ),
+        _e("sp.reports.create", Api.SP_API, "POST", "/reports/2021-06-30/reports", "Request a report; returns a reportId, not data.", rate_limit_rps=0.0222, burst=10, notes="0.0222 rps is one request per 45s. Batch report requests, never loop."),
+        _e("sp.reports.get", Api.SP_API, "GET", "/reports/2021-06-30/reports/{reportId}", "Poll report status until DONE.", rate_limit_rps=2.0, burst=15),
+        _e("sp.reports.document", Api.SP_API, "GET", "/reports/2021-06-30/documents/{reportDocumentId}", "Get the (usually gzipped) document URL for a finished report.", rate_limit_rps=0.0167, burst=15, notes="The returned URL is short-lived. Download immediately, do not persist it."),
+        _e("sp.orders.list", Api.SP_API, "GET", "/orders/v0/orders", "Orders, for reconciliation against ad-attributed sales.", rate_limit_rps=0.0167, burst=20),
+        _e("sp.catalog.item", Api.SP_API, "GET", "/catalog/2022-04-01/items/{asin}", "Catalog attributes for an ASIN.", rate_limit_rps=5.0, burst=40),
+        _e("sp.inventory.summaries", Api.SP_API, "GET", "/fba/inventory/v1/summaries", "FBA inventory; needed before recommending a budget increase.", rate_limit_rps=2.0, burst=30, notes="Scaling spend on an out-of-stock ASIN is the most expensive avoidable mistake."),
+        _e("sp.finances.events", Api.SP_API, "GET", "/finances/v0/financialEvents", "Fees and settlements, to validate the cost ledger against reality.", rate_limit_rps=0.5, burst=30),
+        _e("sp.tokens.rdt", Api.SP_API, "POST", "/tokens/2021-03-01/restrictedDataToken", "Restricted Data Token, required before reading any PII.", rate_limit_rps=1.0, burst=10, notes="We avoid PII entirely for now, so this should stay unused. If it starts being called, that is a scope change and needs a DPA review."),
+        _e("ads.reports.create", Api.ADS, "POST", "/reporting/reports", "Request an async v3 report.", scope="advertising::campaign_management", notes="Body carries reportTypeId, groupBy, columns and the date window. groupBy is what distinguishes campaign grain from placement grain."),
+        _e("ads.reports.get", Api.ADS, "GET", "/reporting/reports/{reportId}", "Poll report status; SUCCESS returns a download URL.", scope="advertising::campaign_management", notes="v2 returned a 307 to an S3 link expiring in ~30s. Download in the same breath."),
+        _e("ads.profiles.list", Api.ADS, "GET", "/v2/profiles", "Advertiser profiles; the profileId scopes every other Ads call.", scope="advertising::campaign_management", notes="One LWA app can see many advertisers. Sending the wrong profileId edits the wrong client's account, and the API will happily accept it."),
+        _e("ads.campaigns.list", Api.ADS, "POST", "/sp/campaigns/list", "List Sponsored Products campaigns, including dynamicBidding config.", scope="advertising::campaign_management", notes="This is where placement bid adjustments live. Needed by #32; until it is ingested, placement_modifier_pct stays NULL by design."),
+        _e("ads.adGroups.list", Api.ADS, "POST", "/sp/adGroups/list", "List ad groups.", scope="advertising::campaign_management"),
+        _e("ads.keywords.list", Api.ADS, "POST", "/sp/keywords/list", "List keywords with current bids.", scope="advertising::campaign_management", notes="Used to re-read before_value at apply time, so a human's manual change is detected as drift instead of being silently overwritten."),
+        _e("ads.campaigns.update", Api.ADS, "PUT", "/sp/campaigns", "Update campaign budget, state, or placement bid adjustments.", mutates=True, scope="advertising::campaign_management", notes="There is no separate placement endpoint: placement modifiers are a field on the campaign (dynamicBidding.placementBidding). See ADR 005."),
+        _e("ads.adGroups.update", Api.ADS, "PUT", "/sp/adGroups", "Update ad group state or default bid.", mutates=True, scope="advertising::campaign_management"),
+        _e("ads.keywords.update", Api.ADS, "PUT", "/sp/keywords", "Update keyword bid or state.", mutates=True, scope="advertising::campaign_management"),
+        _e("ads.keywords.create", Api.ADS, "POST", "/sp/keywords", "Create keywords (search-term harvesting).", mutates=True, scope="advertising::campaign_management"),
+        _e("ads.targets.update", Api.ADS, "PUT", "/sp/targets", "Update product/auto targeting expressions.", mutates=True, scope="advertising::campaign_management"),
+        _e("ads.negativeKeywords.create", Api.ADS, "POST", "/sp/negativeKeywords", "Add negative exact / negative phrase keywords.", mutates=True, scope="advertising::campaign_management", notes="Cheapest irreversible-feeling action: easy to add, easy to forget, and it suppresses traffic silently. Always logged with the search term that caused it."),
     ]
 )
 
-
-# --- Report kinds and their true history windows --------------------------
-#
-# The lookback is not a preference, it is a hard wall. Un-ingested days past it
-# are gone permanently, for everyone, forever.
-#
-# This is the ONLY copy. services/ingest/clients/ads_api.py used to keep a second
-# one, and within days the copy was more complete than this catalog — it knew
-# about spAdGroups and sbV3 while this file did not. The client now imports from
-# here, so a missing kind raises instead of two files disagreeing quietly.
 ADS_REPORT_LOOKBACK_DAYS: dict[str, int] = {
     "spCampaigns": 95,
     "spAdGroups": 95,
@@ -318,62 +130,23 @@ ADS_REPORT_LOOKBACK_DAYS: dict[str, int] = {
 }
 
 SP_REPORT_TYPES: dict[str, str] = {
-    "GET_SALES_AND_TRAFFIC_REPORT": "Sessions, page views, unit session percentage. "
-    "Max 3 requests per 5 minutes; dataStartTime within 2 years; asinGranularity=CHILD.",
-    "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT": "SQP search terms, weekly (Sun-Sat). "
-    "Requires Brand Analytics role and brand registration.",
+    "GET_SALES_AND_TRAFFIC_REPORT": "Sessions, page views, unit session percentage. Max 3 requests per 5 minutes; dataStartTime within 2 years; asinGranularity=CHILD.",
+    "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT": "SQP search terms, weekly (Sun-Sat). Requires Brand Analytics role and brand registration.",
     "GET_BRAND_ANALYTICS_SEARCH_CATALOG_PERFORMANCE_REPORT": "Per-ASIN search funnel.",
     "GET_COUPON_PERFORMANCE_REPORT": "Coupon spend, for true promotional cost.",
 }
 
-# SP-API report history is bounded too, and by a different rule: dataStartTime
-# may go back ~2 years. Kept here so no client hardcodes it.
 SP_MAX_REPORT_HISTORY_DAYS = 730
 
-
-# --- action_type -> the endpoint that would carry it out -------------------
-#
-# Keys must stay in step with the action_action_type_check constraint (0006).
-# tests/test_system_map.py enforces that; do not let this drift.
-#
-# Nested by scope because "pause" means a different endpoint for a campaign than
-# for a keyword, and picking the wrong one edits the wrong object.
 ACTION_ENDPOINTS: dict[str, dict[str, str]] = {
-    "set_bid": {
-        "keyword": "ads.keywords.update",
-        "target": "ads.targets.update",
-        "ad_group": "ads.adGroups.update",
-    },
+    "set_bid": {"keyword": "ads.keywords.update", "target": "ads.targets.update", "ad_group": "ads.adGroups.update"},
     "set_budget": {"campaign": "ads.campaigns.update"},
-    "pause": {
-        "campaign": "ads.campaigns.update",
-        "ad_group": "ads.adGroups.update",
-        "keyword": "ads.keywords.update",
-        "target": "ads.targets.update",
-    },
-    "enable": {
-        "campaign": "ads.campaigns.update",
-        "ad_group": "ads.adGroups.update",
-        "keyword": "ads.keywords.update",
-        "target": "ads.targets.update",
-    },
-    "add_negative_exact": {
-        "campaign": "ads.negativeKeywords.create",
-        "ad_group": "ads.negativeKeywords.create",
-        "search_term": "ads.negativeKeywords.create",
-    },
-    "add_negative_phrase": {
-        "campaign": "ads.negativeKeywords.create",
-        "ad_group": "ads.negativeKeywords.create",
-        "search_term": "ads.negativeKeywords.create",
-    },
-    "create_keyword": {
-        "ad_group": "ads.keywords.create",
-        "search_term": "ads.keywords.create",
-    },
+    "pause": {"campaign": "ads.campaigns.update", "ad_group": "ads.adGroups.update", "keyword": "ads.keywords.update", "target": "ads.targets.update"},
+    "enable": {"campaign": "ads.campaigns.update", "ad_group": "ads.adGroups.update", "keyword": "ads.keywords.update", "target": "ads.targets.update"},
+    "add_negative_exact": {"campaign": "ads.negativeKeywords.create", "ad_group": "ads.negativeKeywords.create", "search_term": "ads.negativeKeywords.create"},
+    "add_negative_phrase": {"campaign": "ads.negativeKeywords.create", "ad_group": "ads.negativeKeywords.create", "search_term": "ads.negativeKeywords.create"},
+    "create_keyword": {"ad_group": "ads.keywords.create", "search_term": "ads.keywords.create"},
     "set_placement_modifier": {"campaign": "ads.campaigns.update"},
-    # Diagnostics never leave the database. This empty mapping is the point:
-    # there is no endpoint a flag could ever reach, by construction.
     "flag": {},
 }
 
@@ -385,11 +158,7 @@ class UnknownEndpoint(KeyError):
 
 
 class UnknownReportKind(KeyError):
-    """Raised instead of defaulting a lookback window.
-
-    A default here would be the worst kind of wrong: the request succeeds, the
-    window is shorter than it should be, and the missing days expire.
-    """
+    """Raised instead of defaulting a lookback window."""
 
 
 def endpoint(key: str) -> Endpoint:
@@ -408,10 +177,8 @@ def lookback_days(report_kind: str) -> int:
         return ADS_REPORT_LOOKBACK_DAYS[report_kind]
     except KeyError:
         raise UnknownReportKind(
-            f"'{report_kind}' has no known lookback window. Add it to "
-            f"ADS_REPORT_LOOKBACK_DAYS in packages/shared/endpoints.py — do not "
-            f"assume 95 days, because assuming too much silently loses the days "
-            f"beyond the real wall."
+            f"'{report_kind}' has no known lookback window. Add it to ADS_REPORT_LOOKBACK_DAYS "
+            f"in packages/shared/endpoints.py — do not assume 95 days."
         ) from None
 
 

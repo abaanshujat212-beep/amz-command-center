@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-static-and-unit:
+    name: Python static checks and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Pytest without database
+        run: pytest -q -m "not db"
+
+  postgres-gate:
+    name: Migration and Postgres-backed tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: axaty
+          POSTGRES_PASSWORD: axaty
+          POSTGRES_DB: axaty
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U axaty -d axaty"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://axaty:axaty@localhost:5432/axaty
+      TEST_DATABASE_URL: postgresql://axaty:axaty@localhost:5432/axaty_test
+      TEST_DB_NAME: axaty_test
+      KEK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      KEK_VERSION: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Apply migrations
+        run: python -m packages.db.migrate up
+
+      - name: Prove migration idempotency
+        run: python -m packages.db.migrate up
+
+      - name: Migration status
+        run: python -m packages.db.migrate status
+
+      - name: Seed dev data
+        run: python -m packages.db.seed
+
+      - name: Create test database
+        run: psql postgresql://axaty:axaty@localhost:5432/postgres -c "create database axaty_test"
+
+      - name: Apply migrations to test database
+        run: DATABASE_URL=$TEST_DATABASE_URL python -m packages.db.migrate up
+
+      - name: Postgres-backed pytest
+        run: pytest -q -m db
+
+  web-build:
+    name: Web typecheck and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        env:
+          DATABASE_URL_APP: postgresql://axaty_app:axaty_app@localhost:5432/axaty
+          DEV_TENANT_ID: 00000000-0000-0000-0000-000000000001
+          DEV_OPERATOR_USER_ID: 00000000-0000-0000-0000-000000000002
+        run: npm run build
