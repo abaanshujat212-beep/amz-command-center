@@ -13,7 +13,7 @@ retention window forever.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 BACKFILL_DAYS = 95
 SETTLEMENT_LAG_DAYS = 3
@@ -73,8 +73,10 @@ def plan_dates(
     if last_complete is None:
         start = oldest_available
     else:
-        start = min(last_complete + dt.timedelta(days=1),
-                    newest - dt.timedelta(days=reingest_days - 1))
+        start = min(
+            last_complete + dt.timedelta(days=1),
+            newest - dt.timedelta(days=reingest_days - 1),
+        )
         start = max(start, oldest_available)
 
     if start > newest:
