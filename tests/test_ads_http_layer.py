@@ -13,12 +13,17 @@ def client() -> AdsClient:
     return c
 
 
+def response(status_code: int, *, json=None, content=None, headers=None, url="https://example.test") -> httpx.Response:
+    request = httpx.Request("GET", url)
+    return httpx.Response(status_code, json=json, content=content, headers=headers, request=request)
+
+
 def test_refresh_access_token_posts_to_regional_token_url(monkeypatch):
     calls = []
 
     def fake_post(url, data, timeout):
         calls.append((url, data, timeout))
-        return httpx.Response(200, json={"access_token": "new-token", "expires_in": 3600, "refresh_token": "rotated"})
+        return response(200, json={"access_token": "new-token", "expires_in": 3600, "refresh_token": "rotated"}, url=url)
 
     monkeypatch.setattr(httpx, "post", fake_post)
     c = AdsClient(AdsCredentials("client-id", "secret", "refresh-token", 123), timeout_s=1)
@@ -29,7 +34,7 @@ def test_refresh_access_token_posts_to_regional_token_url(monkeypatch):
 
 
 def test_refresh_access_token_raises_without_token(monkeypatch):
-    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: httpx.Response(200, json={}))
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: response(200, json={}))
     with pytest.raises(AdsAuthError):
         AdsClient(AdsCredentials("client-id", "secret", "refresh-token"))._refresh_access_token()
 
@@ -39,7 +44,7 @@ def test_call_uses_catalogued_url_and_json_body(monkeypatch):
 
     def fake_request(method, url, **kwargs):
         calls.append((method, url, kwargs))
-        return httpx.Response(200, json={"ok": True})
+        return response(200, json={"ok": True}, url=url)
 
     monkeypatch.setattr(httpx, "request", fake_request)
     result = client()._call("ads.keywords.list", body={"maxResults": 1})
@@ -50,7 +55,10 @@ def test_call_uses_catalogued_url_and_json_body(monkeypatch):
 
 
 def test_call_retries_429_retry_after(monkeypatch):
-    responses = [httpx.Response(429, headers={"Retry-After": "0"}), httpx.Response(200, json={"ok": True})]
+    responses = [
+        response(429, headers={"Retry-After": "0"}),
+        response(200, json={"ok": True}),
+    ]
     monkeypatch.setattr(httpx, "request", lambda *args, **kwargs: responses.pop(0))
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     assert client()._call("ads.keywords.list", body={}) == {"ok": True}
@@ -74,7 +82,7 @@ def test_download_report_follows_redirects(monkeypatch):
 
     def fake_get(url, follow_redirects, timeout):
         calls.append((url, follow_redirects, timeout))
-        return httpx.Response(200, content=b"payload")
+        return response(200, content=b"payload", url=url)
 
     monkeypatch.setattr(httpx, "get", fake_get)
     assert client().download_report("https://download") == b"payload"
