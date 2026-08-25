@@ -76,4 +76,5 @@ def test_verify_action_persists_verified_status():
     assert updated.status == sm.Status.VERIFIED
     assert updated.outcome == "improved"
     assert conn.updates
-    assert conn.updates[0][1][3]["entity_type"] == "keyword"
+    impact = conn.updates[0][1][3].obj
+    assert impact["entity_type"] == "keyword"
