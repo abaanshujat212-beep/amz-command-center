@@ -21,6 +21,8 @@ sources:
         freshness: null
       - name: raw_ads_placement_config
         freshness: null
+      - name: raw_keepa_product_snapshot
+        freshness: null
       - name: raw_sales_traffic_asin_daily
 
   - name: app
