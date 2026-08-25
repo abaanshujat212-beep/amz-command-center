@@ -11,6 +11,14 @@ class FakeAds:
         self.credentials = SimpleNamespace(refresh_token="rotated-token")
         self.connection_id = "conn-1"
 
+    def keyword_bid(self, keyword_id):
+        self.calls.append(("read_bid", keyword_id))
+        return {"value": 1.0}
+
+    def placement_modifier(self, campaign_id, placement):
+        self.calls.append(("read_placement", campaign_id, placement))
+        return {"value": 15.0, "placement": placement}
+
     def update_bid(self, entity_id, new_bid, dry_run=True):
         self.calls.append(("bid", entity_id, new_bid, dry_run))
         return {"ok": True}
@@ -40,6 +48,21 @@ def action(action_type="set_bid", entity_type="keyword"):
         status=sm.Status.APPROVED,
         approved_at=dt.datetime.now(dt.timezone.utc),
     )
+
+
+def test_ads_action_client_reads_keyword_bid_before_apply():
+    ads = FakeAds()
+    assert AdsActionClient(ads).read_before_value(action()) == {"value": 1.0}
+    assert ads.calls == [("read_bid", "k1")]
+
+
+def test_ads_action_client_reads_placement_modifier_before_apply():
+    ads = FakeAds()
+    a = action("set_placement_modifier", "campaign")
+    a.entity_id = "c1"
+    a.after_value = {"value": 30, "placement": "PLACEMENT_TOP"}
+    assert AdsActionClient(ads).read_before_value(a) == {"value": 15.0, "placement": "PLACEMENT_TOP"}
+    assert ads.calls == [("read_placement", "c1", "PLACEMENT_TOP")]
 
 
 def test_ads_action_client_applies_keyword_bid():

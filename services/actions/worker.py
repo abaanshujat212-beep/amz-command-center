@@ -44,15 +44,17 @@ class DryRunActionClient:
 
 
 class AdsActionClient:
-    """Translate approved action rows into Ads API mutations."""
+    """Translate approved action rows into Ads API reads and mutations."""
 
     def __init__(self, ads: AdsClient) -> None:
         self.ads = ads
 
     def read_before_value(self, action: sm.Action) -> dict | None:
-        # Full live lookup is intentionally narrow for the first real write seam.
-        # The worker still has drift protection: if callers provide a richer
-        # client, its live value is compared by state_machine.apply().
+        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+            return self.ads.keyword_bid(action.entity_id)
+        if action.action_type == "set_placement_modifier":
+            placement = str(action.after_value["placement"])
+            return self.ads.placement_modifier(action.entity_id, placement)
         return action.before_value
 
     def apply(self, action: sm.Action) -> dict:
