@@ -55,7 +55,6 @@ class AdsClient:
 
     @property
     def token_url(self) -> str:
-        """Ads LWA token endpoint is region-specific, unlike SP-API's."""
         return ep.REGIONS[self.region].ads_token_url
 
     def _refresh_access_token(self) -> str:
@@ -101,24 +100,16 @@ class AdsClient:
         return h
 
     def url(self, endpoint_key: str, **path_params: str) -> str:
-        """The only way a URL is produced in this class."""
         return ep.url_for(endpoint_key, region=self.region, **path_params)
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:
         endpoint = ep.endpoint(endpoint_key)
-        method = endpoint.method.upper()
         kwargs: dict[str, Any] = {"headers": self.headers(), "timeout": self.timeout_s}
         if body is not None:
             kwargs["json"] = body
-        return httpx.request(method, self.url(endpoint_key, **path_params), **kwargs)
+        return httpx.request(endpoint.method.upper(), self.url(endpoint_key, **path_params), **kwargs)
 
     def _call(self, endpoint_key: str, *, body: dict | None = None, **path_params: str):
-        """Dispatch an Ads request through the endpoint catalog.
-
-        Ads has dynamic rate limits, so most pacing is honouring Retry-After on
-        429. Published-limit endpoints still get a shared token bucket from the
-        common rate-limit module.
-        """
         ep.endpoint(endpoint_key)
         rate_limit.acquire(endpoint_key)
         last_error: Exception | None = None
@@ -167,17 +158,42 @@ class AdsClient:
     def list_profiles(self) -> list[dict]:
         return self._call("ads.profiles.list")
 
-    def list_campaigns(self, next_token: str | None = None) -> dict:
+    def list_campaigns(self, next_token: str | None = None, campaign_ids: list[str] | None = None) -> dict:
         body: dict = {"maxResults": 500}
         if next_token:
             body["nextToken"] = next_token
+        if campaign_ids:
+            body["campaignIdFilter"] = {"include": campaign_ids}
         return self._call("ads.campaigns.list", body=body)
 
-    def list_keywords(self, campaign_ids: list[str] | None = None) -> dict:
+    def list_keywords(self, campaign_ids: list[str] | None = None, keyword_ids: list[str] | None = None) -> dict:
         body: dict = {"maxResults": 500}
         if campaign_ids:
             body["campaignIdFilter"] = {"include": campaign_ids}
+        if keyword_ids:
+            body["keywordIdFilter"] = {"include": keyword_ids}
         return self._call("ads.keywords.list", body=body)
+
+    def keyword_bid(self, keyword_id: str) -> dict:
+        result = self.list_keywords(keyword_ids=[keyword_id])
+        keywords = result.get("keywords") or result.get("keywordResponse") or []
+        for keyword in keywords:
+            if str(keyword.get("keywordId")) == str(keyword_id):
+                return {"value": keyword.get("bid")}
+        raise RuntimeError(f"keyword {keyword_id} was not returned by Ads API")
+
+    def placement_modifier(self, campaign_id: str, placement_api_enum: str) -> dict:
+        result = self.list_campaigns(campaign_ids=[campaign_id])
+        campaigns = result.get("campaigns") or result.get("campaignResponse") or []
+        for campaign in campaigns:
+            if str(campaign.get("campaignId")) != str(campaign_id):
+                continue
+            bidding = campaign.get("dynamicBidding") or {}
+            for placement in bidding.get("placementBidding") or []:
+                if placement.get("placement") == placement_api_enum:
+                    return {"value": placement.get("percentage"), "placement": placement_api_enum}
+            return {"value": 0, "placement": placement_api_enum}
+        raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
 
     @staticmethod
     def check_lookback(report_kind: str, start_date: dt.date) -> None:
