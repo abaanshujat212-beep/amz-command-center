@@ -1,86 +1,24 @@
 import type { PoolClient } from "pg"
 import { mart, query } from "./db"
 
-export type CampaignRow = {
-	campaign_id: string
-	campaign_name: string
-	campaign_status: string | null
-	targeting_type: string | null
-	budget_amount: number | null
-	impressions: number
-	clicks: number
-	cost: number
-	orders: number
-	sales: number
-	acos: number | null
-	roas: number | null
-	ctr: number | null
-	cvr: number | null
-	cpc: number | null
-	break_even_acos: number | null
-	economics_incomplete: boolean
-	budget_utilisation: number | null
-	days: number
-}
-
-export async function campaignPerformance(client: PoolClient, days = 30): Promise<CampaignRow[]> {
-	return query<CampaignRow>(client, `
-		with window_rows as (
-			select * from ${mart("mart_ppc_campaign_daily")}
-			 where is_settled and report_date >= current_date - ($1::int || ' days')::interval
-		), latest_budget as (
-			select distinct on (campaign_id) campaign_id, budget_amount, campaign_status, campaign_name, targeting_type
-			  from window_rows order by campaign_id, report_date desc
-		)
-		select w.campaign_id, b.campaign_name, b.campaign_status, b.targeting_type, b.budget_amount,
-			sum(w.impressions) as impressions, sum(w.clicks) as clicks, sum(w.cost) as cost,
-			sum(w.attributed_orders_7d) as orders, sum(w.attributed_sales_7d) as sales,
-			case when sum(w.attributed_sales_7d) > 0 then sum(w.cost) / sum(w.attributed_sales_7d) end as acos,
-			case when sum(w.cost) > 0 then sum(w.attributed_sales_7d) / sum(w.cost) end as roas,
-			case when sum(w.impressions) > 0 then sum(w.clicks)::numeric / sum(w.impressions) end as ctr,
-			case when sum(w.clicks) > 0 then sum(w.attributed_orders_7d)::numeric / sum(w.clicks) end as cvr,
-			case when sum(w.clicks) > 0 then sum(w.cost) / sum(w.clicks) end as cpc,
-			min(w.break_even_acos) as break_even_acos, bool_or(w.economics_incomplete) as economics_incomplete,
-			case when sum(w.budget_amount) > 0 then sum(w.cost) / sum(w.budget_amount) end as budget_utilisation,
-			count(*) as days
-		  from window_rows w join latest_budget b using (campaign_id)
-		 group by w.campaign_id, b.campaign_name, b.campaign_status, b.targeting_type, b.budget_amount
-		 order by sum(w.cost) desc`, [days])
-}
+export type CampaignRow = { campaign_id: string; campaign_name: string; campaign_status: string | null; targeting_type: string | null; budget_amount: number | null; impressions: number; clicks: number; cost: number; orders: number; sales: number; acos: number | null; roas: number | null; ctr: number | null; cvr: number | null; cpc: number | null; break_even_acos: number | null; economics_incomplete: boolean; budget_utilisation: number | null; days: number }
+export async function campaignPerformance(client: PoolClient, days = 30): Promise<CampaignRow[]> { return query<CampaignRow>(client, `with window_rows as (select * from ${mart("mart_ppc_campaign_daily")} where is_settled and report_date >= current_date - ($1::int || ' days')::interval), latest_budget as (select distinct on (campaign_id) campaign_id, budget_amount, campaign_status, campaign_name, targeting_type from window_rows order by campaign_id, report_date desc) select w.campaign_id, b.campaign_name, b.campaign_status, b.targeting_type, b.budget_amount, sum(w.impressions) as impressions, sum(w.clicks) as clicks, sum(w.cost) as cost, sum(w.attributed_orders_7d) as orders, sum(w.attributed_sales_7d) as sales, case when sum(w.attributed_sales_7d) > 0 then sum(w.cost) / sum(w.attributed_sales_7d) end as acos, case when sum(w.cost) > 0 then sum(w.attributed_sales_7d) / sum(w.cost) end as roas, case when sum(w.impressions) > 0 then sum(w.clicks)::numeric / sum(w.impressions) end as ctr, case when sum(w.clicks) > 0 then sum(w.attributed_orders_7d)::numeric / sum(w.clicks) end as cvr, case when sum(w.clicks) > 0 then sum(w.cost) / sum(w.clicks) end as cpc, min(w.break_even_acos) as break_even_acos, bool_or(w.economics_incomplete) as economics_incomplete, case when sum(w.budget_amount) > 0 then sum(w.cost) / sum(w.budget_amount) end as budget_utilisation, count(*) as days from window_rows w join latest_budget b using (campaign_id) group by w.campaign_id, b.campaign_name, b.campaign_status, b.targeting_type, b.budget_amount order by sum(w.cost) desc`, [days]) }
 
 export type AccountTotals = { cost: number; sales: number; orders: number; clicks: number; impressions: number; acos: number | null; campaigns: number; data_through: string | null }
-export async function accountTotals(client: PoolClient, days = 30): Promise<AccountTotals | null> {
-	const rows = await query<AccountTotals>(client, `select coalesce(sum(cost), 0) as cost, coalesce(sum(attributed_sales_7d), 0) as sales, coalesce(sum(attributed_orders_7d), 0) as orders, coalesce(sum(clicks), 0) as clicks, coalesce(sum(impressions), 0) as impressions, case when sum(attributed_sales_7d) > 0 then sum(cost) / sum(attributed_sales_7d) end as acos, count(distinct campaign_id) as campaigns, max(report_date)::text as data_through from ${mart("mart_ppc_campaign_daily")} where is_settled and report_date >= current_date - ($1::int || ' days')::interval`, [days])
-	return rows[0] ?? null
-}
+export async function accountTotals(client: PoolClient, days = 30): Promise<AccountTotals | null> { const rows = await query<AccountTotals>(client, `select coalesce(sum(cost), 0) as cost, coalesce(sum(attributed_sales_7d), 0) as sales, coalesce(sum(attributed_orders_7d), 0) as orders, coalesce(sum(clicks), 0) as clicks, coalesce(sum(impressions), 0) as impressions, case when sum(attributed_sales_7d) > 0 then sum(cost) / sum(attributed_sales_7d) end as acos, count(distinct campaign_id) as campaigns, max(report_date)::text as data_through from ${mart("mart_ppc_campaign_daily")} where is_settled and report_date >= current_date - ($1::int || ' days')::interval`, [days]); return rows[0] ?? null }
+
+export type ProductRow = { asin: string; sku: string | null; units: number; total_sales: number; ad_spend: number; ad_sales: number; tacos: number | null; acos: number | null; contribution_margin_pct: number | null; break_even_acos: number | null; economics_incomplete: boolean; gross_profit_est: number | null }
+export async function productAnalytics(client: PoolClient, days = 30, limit = 20): Promise<ProductRow[]> { return query<ProductRow>(client, `with sales as (select tenant_id, asin, min(sku) as sku, sum(units_ordered) as units, sum(ordered_product_sales) as total_sales from ${mart("stg_sales_traffic_asin_daily")} where report_date >= current_date - ($1::int || ' days')::interval group by 1,2), ads as (select tenant_id, asin, sum(cost) as ad_spend, sum(attributed_sales_7d) as ad_sales from ${mart("stg_ads_advertised_product_daily")} where report_date >= current_date - ($1::int || ' days')::interval group by 1,2), econ as (select tenant_id, asin, min(contribution_margin_pct) as contribution_margin_pct, min(break_even_acos) as break_even_acos, bool_or(economics_incomplete) as economics_incomplete from ${mart("mart_sku_economics")} group by 1,2) select coalesce(s.asin, a.asin) as asin, s.sku, coalesce(s.units, 0) as units, coalesce(s.total_sales, 0) as total_sales, coalesce(a.ad_spend, 0) as ad_spend, coalesce(a.ad_sales, 0) as ad_sales, case when coalesce(s.total_sales, 0) > 0 then coalesce(a.ad_spend, 0) / s.total_sales end as tacos, case when coalesce(a.ad_sales, 0) > 0 then coalesce(a.ad_spend, 0) / a.ad_sales end as acos, e.contribution_margin_pct, e.break_even_acos, coalesce(e.economics_incomplete, true) as economics_incomplete, case when e.contribution_margin_pct is not null then coalesce(s.total_sales, 0) * e.contribution_margin_pct - coalesce(a.ad_spend, 0) end as gross_profit_est from sales s full join ads a on a.tenant_id = s.tenant_id and a.asin = s.asin left join econ e on e.tenant_id = coalesce(s.tenant_id, a.tenant_id) and e.asin = coalesce(s.asin, a.asin) order by coalesce(s.total_sales, 0) desc, coalesce(a.ad_spend, 0) desc limit $2`, [days, limit]) }
 
 export type PendingAction = { id: string; entity_type: string; entity_id: string; action_type: string; before_value: unknown; after_value: unknown; reason_text: string | null; clamped: boolean; clamp_note: string | null; requested_at: string; expires_at: string; rule_code: string | null; rule_name: string | null }
-export async function pendingActions(client: PoolClient, limit = 100): Promise<PendingAction[]> {
-	return query<PendingAction>(client, `select a.id, a.entity_type, a.entity_id, a.action_type, a.before_value, a.after_value, a.reason_text, a.clamped, a.clamp_note, a.requested_at, a.expires_at, r.code as rule_code, r.name as rule_name from action a left join rule r on r.id = a.rule_id where a.status = 'pending' and a.action_type <> 'flag' and a.expires_at > now() order by a.requested_at asc limit $1`, [limit])
-}
-
+export async function pendingActions(client: PoolClient, limit = 100): Promise<PendingAction[]> { return query<PendingAction>(client, `select a.id, a.entity_type, a.entity_id, a.action_type, a.before_value, a.after_value, a.reason_text, a.clamped, a.clamp_note, a.requested_at, a.expires_at, r.code as rule_code, r.name as rule_name from action a left join rule r on r.id = a.rule_id where a.status = 'pending' and a.action_type <> 'flag' and a.expires_at > now() order by a.requested_at asc limit $1`, [limit]) }
 export type Finding = { id: string; entity_type: string; entity_id: string; reason_text: string | null; requested_at: string; rule_code: string | null; rule_name: string | null }
-export async function openFindings(client: PoolClient, limit = 100): Promise<Finding[]> {
-	return query<Finding>(client, `select a.id, a.entity_type, a.entity_id, a.reason_text, a.requested_at, r.code as rule_code, r.name as rule_name from action a left join rule r on r.id = a.rule_id where a.status = 'pending' and a.action_type = 'flag' order by a.requested_at desc limit $1`, [limit])
-}
-
+export async function openFindings(client: PoolClient, limit = 100): Promise<Finding[]> { return query<Finding>(client, `select a.id, a.entity_type, a.entity_id, a.reason_text, a.requested_at, r.code as rule_code, r.name as rule_name from action a left join rule r on r.id = a.rule_id where a.status = 'pending' and a.action_type = 'flag' order by a.requested_at desc limit $1`, [limit]) }
 export type Freshness = { dataset: string; last_success: string | null; last_status: string | null; hours_old: number | null }
-export async function dataFreshness(client: PoolClient): Promise<Freshness[]> {
-	return query<Freshness>(client, `select distinct on (dataset) dataset, finished_at::text as last_success, status as last_status, round(extract(epoch from (now() - finished_at)) / 3600.0, 1) as hours_old from pipeline_run order by dataset, started_at desc`)
-}
-
+export async function dataFreshness(client: PoolClient): Promise<Freshness[]> { return query<Freshness>(client, `select distinct on (dataset) dataset, finished_at::text as last_success, status as last_status, round(extract(epoch from (now() - finished_at)) / 3600.0, 1) as hours_old from pipeline_run order by dataset, started_at desc`) }
 export type AutomationState = { automation_enabled: boolean; dry_run: boolean; target_acos_default: number | null; max_changes_per_day: number | null; currency: string | null }
-export async function automationState(client: PoolClient): Promise<AutomationState | null> {
-	const rows = await query<AutomationState>(client, `select automation_enabled, dry_run, target_acos_default, max_changes_per_day, currency from tenant_settings limit 1`)
-	return rows[0] ?? null
-}
-
+export async function automationState(client: PoolClient): Promise<AutomationState | null> { const rows = await query<AutomationState>(client, `select automation_enabled, dry_run, target_acos_default, max_changes_per_day, currency from tenant_settings limit 1`); return rows[0] ?? null }
 export type OpenAlert = { id: string; kind: string; severity: string; title: string; entity_ref: string | null; created_at: string; detail: unknown }
-export async function openAlerts(client: PoolClient, limit = 20): Promise<OpenAlert[]> {
-	return query<OpenAlert>(client, `select id::text, kind, severity, title, entity_ref, created_at::text, detail from alert where resolved_at is null order by case severity when 'critical' then 0 when 'warning' then 1 else 2 end, created_at desc limit $1`, [limit])
-}
-
+export async function openAlerts(client: PoolClient, limit = 20): Promise<OpenAlert[]> { return query<OpenAlert>(client, `select id::text, kind, severity, title, entity_ref, created_at::text, detail from alert where resolved_at is null order by case severity when 'critical' then 0 when 'warning' then 1 else 2 end, created_at desc limit $1`, [limit]) }
 export type PipelineRunSummary = { dataset: string; status: string; started_at: string; finished_at: string | null; rows_loaded: number | null; error: string | null }
-export async function recentPipelineRuns(client: PoolClient, limit = 20): Promise<PipelineRunSummary[]> {
-	return query<PipelineRunSummary>(client, `select dataset, status, started_at::text, finished_at::text, rows_loaded, error from pipeline_run order by started_at desc limit $1`, [limit])
-}
+export async function recentPipelineRuns(client: PoolClient, limit = 20): Promise<PipelineRunSummary[]> { return query<PipelineRunSummary>(client, `select dataset, status, started_at::text, finished_at::text, rows_loaded, error from pipeline_run order by started_at desc limit $1`, [limit]) }
