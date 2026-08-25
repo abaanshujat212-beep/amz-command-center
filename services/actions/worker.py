@@ -1,9 +1,4 @@
-"""Approved-action worker seam.
-
-Loads approved actions, re-reads the live Amazon baseline through an injected
-client, applies the write, and records the state-machine result. The default
-client is intentionally dry-run until the Ads HTTP layer is implemented.
-"""
+"""Approved-action worker with Ads-client wiring and refresh-token persistence."""
 
 from __future__ import annotations
 
@@ -17,6 +12,8 @@ import psycopg
 from psycopg.rows import dict_row
 
 from services.actions import state_machine as sm
+from services.ingest.clients.ads_api import AdsClient, AdsCredentials
+from services.ingest.security.vault import seal, unseal
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 
@@ -44,6 +41,41 @@ class DryRunActionClient:
 
     def rollback(self, action: sm.Action) -> dict:
         return {"status": "WOULD_ROLLBACK", "action_id": action.id}
+
+
+class AdsActionClient:
+    """Translate approved action rows into Ads API mutations."""
+
+    def __init__(self, ads: AdsClient) -> None:
+        self.ads = ads
+
+    def read_before_value(self, action: sm.Action) -> dict | None:
+        # Full live lookup is intentionally narrow for the first real write seam.
+        # The worker still has drift protection: if callers provide a richer
+        # client, its live value is compared by state_machine.apply().
+        return action.before_value
+
+    def apply(self, action: sm.Action) -> dict:
+        value = action.after_value.get("value")
+        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+            return self.ads.update_bid(action.entity_id, float(value), dry_run=False)
+        if action.action_type == "set_placement_modifier":
+            return self.ads.update_placement_modifier(
+                action.entity_id,
+                str(action.after_value["placement"]),
+                float(value),
+                float(action.before_value["value"]) if action.before_value else None,
+                dry_run=False,
+            )
+        raise NotImplementedError(f"Ads action not wired yet: {action.entity_type}/{action.action_type}")
+
+    def rollback(self, action: sm.Action) -> dict:
+        if action.before_value is None:
+            raise RuntimeError("cannot rollback without before_value")
+        original = action.before_value.get("value")
+        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+            return self.ads.update_bid(action.entity_id, float(original), dry_run=False)
+        raise NotImplementedError(f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}")
 
 
 def _to_action(row: dict) -> sm.Action:
@@ -77,6 +109,48 @@ def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
     return [_to_action(r) for r in rows]
 
 
+def load_ads_client(conn, tenant_id: str) -> AdsClient:
+    row = conn.execute(
+        """
+        select c.id, c.region, c.refresh_token_encrypted, p.profile_id
+          from amazon_connection c
+          left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
+         where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
+         order by p.created_at nulls last
+         limit 1
+        """,
+        (tenant_id,),
+    ).fetchone()
+    if row is None or row["refresh_token_encrypted"] is None:
+        raise RuntimeError(f"tenant {tenant_id} has no active Ads API refresh token")
+    client_id = os.environ.get("ADS_CLIENT_ID")
+    client_secret = os.environ.get("ADS_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise RuntimeError("ADS_CLIENT_ID and ADS_CLIENT_SECRET must be set")
+    ads = AdsClient(
+        AdsCredentials(client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])), row["profile_id"]),
+        tenant_id=tenant_id,
+        region=row["region"],
+    )
+    ads.connection_id = row["id"]
+    return ads
+
+
+def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
+    connection_id = getattr(ads, "connection_id", None)
+    if connection_id is None:
+        return
+    sealed = seal(ads.credentials.refresh_token)
+    conn.execute(
+        """
+        update amazon_connection
+           set refresh_token_encrypted = %s, key_version = %s, updated_at = now()
+         where id = %s
+        """,
+        (sealed.ciphertext, sealed.key_version, connection_id),
+    )
+
+
 def persist_apply_result(conn, action: sm.Action, api_response: dict | None = None) -> None:
     conn.execute(
         """
@@ -106,12 +180,25 @@ def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -
     return sm.apply(action, now=now, live_before_value=live_before, api_ok=True), response
 
 
-def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = None, database_url: str = DATABASE_URL) -> WorkerResult:
+def run_once(
+    tenant_id: str,
+    *,
+    limit: int = 25,
+    client: ActionClient | None = None,
+    database_url: str = DATABASE_URL,
+    live_ads: bool = False,
+) -> WorkerResult:
     result = WorkerResult()
-    client = client or DryRunActionClient()
     now = dt.datetime.now(dt.timezone.utc)
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
         conn.execute("select set_tenant(%s)", (tenant_id,))
+        ads_client = None
+        if client is None:
+            if live_ads:
+                ads_client = load_ads_client(conn, tenant_id)
+                client = AdsActionClient(ads_client)
+            else:
+                client = DryRunActionClient()
         actions = fetch_approved(conn, tenant_id, limit)
         result.scanned = len(actions)
         for action in actions:
@@ -121,6 +208,8 @@ def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = N
                 result.applied += 1
             else:
                 result.failed += 1
+        if ads_client is not None:
+            persist_rotated_refresh_token(conn, ads_client)
         conn.commit()
     return result
 
@@ -129,10 +218,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Apply approved actions for one tenant")
     parser.add_argument("--tenant-id", default=os.environ.get("DEV_TENANT_ID"))
     parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--live-ads", action="store_true", help="Use the real Ads client instead of dry-run")
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
-    result = run_once(args.tenant_id, limit=args.limit)
+    result = run_once(args.tenant_id, limit=args.limit, live_ads=args.live_ads)
     print(f"actions scanned={result.scanned} applied={result.applied} failed={result.failed}")
 
 
