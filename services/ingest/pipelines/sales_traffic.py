@@ -15,7 +15,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from services.ingest.clients.sp_api import SALES_AND_TRAFFIC, SpApiClient, SpApiCredentials
-from services.ingest.security.vault import unseal
+from services.ingest.security.vault import seal, unseal
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 BACKFILL_DAYS = 730
@@ -27,6 +27,7 @@ REPORT_OPTIONS = {"dateGranularity": "DAY", "asinGranularity": "CHILD"}
 
 @dataclass(frozen=True)
 class SpConnection:
+    connection_id: str
     region: str
     client_id: str
     client_secret: str
@@ -133,7 +134,7 @@ def normalize_row(row: dict[str, Any], fallback_date: dt.date) -> tuple[dt.date,
 def load_sp_connection(conn, tenant_id: str) -> SpConnection:
     row = conn.execute(
         """
-        select region, refresh_token_encrypted
+        select id, region, refresh_token_encrypted
           from amazon_connection
          where tenant_id = %s and provider = 'sp_api' and status = 'active'
          limit 1
@@ -148,7 +149,23 @@ def load_sp_connection(conn, tenant_id: str) -> SpConnection:
     client_secret = os.environ.get("SPAPI_CLIENT_SECRET")
     if not client_id or not client_secret:
         raise RuntimeError("SPAPI_CLIENT_ID and SPAPI_CLIENT_SECRET must be set")
-    return SpConnection(row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])))
+    return SpConnection(str(row["id"]), row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])))
+
+
+def persist_rotated_refresh_token(conn, connection: SpConnection, client: SalesTrafficClient) -> None:
+    credentials = getattr(client, "credentials", None)
+    new_token = getattr(credentials, "refresh_token", None)
+    if not new_token or new_token == connection.refresh_token:
+        return
+    sealed = seal(str(new_token))
+    conn.execute(
+        """
+        update amazon_connection
+           set refresh_token_encrypted = %s, key_version = %s, updated_at = now()
+         where id = %s
+        """,
+        (sealed.ciphertext, sealed.key_version, connection.connection_id),
+    )
 
 
 def read_watermark(conn, tenant_id: str) -> dt.date | None:
@@ -239,6 +256,8 @@ def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, c
         finish_pipeline_run(conn, run_id, result)
         if result.failed == 0:
             update_watermark(conn, tenant_id, dates)
+        if sp_connection is not None:
+            persist_rotated_refresh_token(conn, sp_connection, client)
         conn.commit()
         return result
 

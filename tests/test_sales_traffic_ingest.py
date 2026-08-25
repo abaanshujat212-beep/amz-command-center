@@ -1,13 +1,24 @@
 import datetime as dt
 import gzip
 import json
+from types import SimpleNamespace
 
 from services.ingest.pipelines.sales_traffic import (
     REPORT_OPTIONS,
+    SpConnection,
     normalize_row,
     parse_report_payload,
+    persist_rotated_refresh_token,
     plan_dates,
 )
+
+
+class FakeConn:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, params):
+        self.calls.append((sql, params))
 
 
 def test_sales_traffic_uses_child_daily_options():
@@ -44,3 +55,26 @@ def test_plan_dates_reingests_recent_tail():
     dates = plan_dates(today - dt.timedelta(days=2), today=today)
     assert dates[0] <= today - dt.timedelta(days=14)
     assert dates[-1] == today - dt.timedelta(days=1)
+
+
+def test_persist_rotated_refresh_token_writes_ciphertext(monkeypatch):
+    monkeypatch.setenv("KEK_BASE64", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    conn = FakeConn()
+    connection = SpConnection("conn-1", "eu", "client-id", "secret", "old-token")
+    client = SimpleNamespace(credentials=SimpleNamespace(refresh_token="rotated-token"))
+    persist_rotated_refresh_token(conn, connection, client)
+    assert conn.calls
+    sql, params = conn.calls[0]
+    assert "refresh_token_encrypted" in sql
+    assert params[1] == 1
+    assert params[2] == "conn-1"
+    assert params[0] != b"rotated-token"
+
+
+def test_persist_rotated_refresh_token_skips_unchanged_token(monkeypatch):
+    monkeypatch.setenv("KEK_BASE64", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    conn = FakeConn()
+    connection = SpConnection("conn-1", "eu", "client-id", "secret", "same-token")
+    client = SimpleNamespace(credentials=SimpleNamespace(refresh_token="same-token"))
+    persist_rotated_refresh_token(conn, connection, client)
+    assert conn.calls == []
