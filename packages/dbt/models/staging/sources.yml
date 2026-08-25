@@ -19,6 +19,8 @@ sources:
       - name: raw_ads_sp_purchased_product_daily
       - name: raw_ads_negative_keywords
         freshness: null
+      - name: raw_ads_placement_config
+        freshness: null
       - name: raw_sales_traffic_asin_daily
 
   - name: app
