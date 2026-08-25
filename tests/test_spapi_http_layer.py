@@ -3,11 +3,29 @@ import datetime as dt
 import httpx
 import pytest
 
-from services.ingest.clients.sp_api import SpApiAuthError, SpApiClient, SpApiCredentials, SALES_AND_TRAFFIC
+from services.ingest.clients.sp_api import (
+    SALES_AND_TRAFFIC,
+    SpApiAuthError,
+    SpApiClient,
+    SpApiCredentials,
+)
 
 
-def response(status_code: int, *, json=None, content=None, headers=None, url="https://example.test") -> httpx.Response:
-    return httpx.Response(status_code, json=json, content=content, headers=headers, request=httpx.Request("GET", url))
+def response(
+    status_code: int,
+    *,
+    json=None,
+    content=None,
+    headers=None,
+    url="https://example.test",
+) -> httpx.Response:
+    return httpx.Response(
+        status_code,
+        json=json,
+        content=content,
+        headers=headers,
+        request=httpx.Request("GET", url),
+    )
 
 
 def client() -> SpApiClient:
@@ -22,7 +40,15 @@ def test_refresh_access_token_uses_global_token_url(monkeypatch):
 
     def fake_post(url, data, timeout):
         calls.append((url, data, timeout))
-        return response(200, json={"access_token": "new-token", "expires_in": 3600, "refresh_token": "rotated"}, url=url)
+        return response(
+            200,
+            json={
+                "access_token": "new-token",
+                "expires_in": 3600,
+                "refresh_token": "rotated",
+            },
+            url=url,
+        )
 
     monkeypatch.setattr(httpx, "post", fake_post)
     c = SpApiClient(SpApiCredentials("client-id", "secret", "refresh-token"), timeout_s=1)
@@ -54,14 +80,29 @@ def test_call_uses_catalogued_url_and_body(monkeypatch):
 def test_create_report_returns_report_id(monkeypatch):
     c = client()
     monkeypatch.setattr(c, "_call", lambda endpoint, body=None, **params: {"reportId": "r-1"})
-    monkeypatch.setattr("services.ingest.clients.rate_limit.acquire_report_type", lambda _report_type: None)
+    monkeypatch.setattr(
+        "services.ingest.clients.rate_limit.acquire_report_type",
+        lambda _report_type: None,
+    )
     today = dt.date.today()
-    assert c.create_report(SALES_AND_TRAFFIC, today - dt.timedelta(days=2), today - dt.timedelta(days=1), {"dateGranularity": "DAY", "asinGranularity": "CHILD"}) == "r-1"
+    assert (
+        c.create_report(
+            SALES_AND_TRAFFIC,
+            today - dt.timedelta(days=2),
+            today - dt.timedelta(days=1),
+            {"dateGranularity": "DAY", "asinGranularity": "CHILD"},
+        )
+        == "r-1"
+    )
 
 
 def test_wait_for_report_returns_document_id(monkeypatch):
     c = client()
-    monkeypatch.setattr(c, "_call", lambda endpoint, **params: {"processingStatus": "DONE", "reportDocumentId": "doc-1"})
+    monkeypatch.setattr(
+        c,
+        "_call",
+        lambda endpoint, **params: {"processingStatus": "DONE", "reportDocumentId": "doc-1"},
+    )
     assert c.wait_for_report("r-1", timeout_s=1) == "doc-1"
 
 
