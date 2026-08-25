@@ -1,9 +1,4 @@
-"""T+7 action verification and scorecard.
-
-Reads applied actions whose verification window has matured, compares post-action
-performance with the pre-action baseline window, and marks the action verified
-with an operator-readable outcome.
-"""
+"""T+7 action verification and scorecard."""
 
 from __future__ import annotations
 
@@ -80,6 +75,22 @@ def fetch_due_actions(conn, tenant_id: str, now: dt.datetime, limit: int) -> lis
     return [_to_action(r) for r in rows]
 
 
+def _window_from_row(row: dict) -> MetricWindow:
+    return MetricWindow(float(row["cost"]), float(row["sales"]), int(row["clicks"]), int(row["orders"]))
+
+
+def performance_window(conn, action: sm.Action, start: dt.date, end: dt.date) -> MetricWindow:
+    if action.entity_type in {"keyword", "target"}:
+        return keyword_window(conn, action.tenant_id, action.entity_id, start, end)
+    if action.entity_type == "campaign":
+        return campaign_window(conn, action.tenant_id, action.entity_id, start, end)
+    if action.entity_type == "placement":
+        return placement_window(conn, action.tenant_id, action.entity_id, start, end)
+    if action.entity_type == "search_term":
+        return search_term_window(conn, action.tenant_id, action.entity_id, start, end)
+    raise ValueError(f"verification not wired for entity_type={action.entity_type!r}")
+
+
 def keyword_window(conn, tenant_id: str, keyword_id: str, start: dt.date, end: dt.date) -> MetricWindow:
     row = conn.execute(
         """
@@ -96,7 +107,66 @@ def keyword_window(conn, tenant_id: str, keyword_id: str, start: dt.date, end: d
         """,
         (tenant_id, keyword_id, start, end),
     ).fetchone()
-    return MetricWindow(float(row["cost"]), float(row["sales"]), int(row["clicks"]), int(row["orders"]))
+    return _window_from_row(row)
+
+
+def campaign_window(conn, tenant_id: str, campaign_id: str, start: dt.date, end: dt.date) -> MetricWindow:
+    row = conn.execute(
+        """
+        select coalesce(sum(cost), 0) as cost,
+               coalesce(sum(attributed_sales_7d), 0) as sales,
+               coalesce(sum(clicks), 0) as clicks,
+               coalesce(sum(attributed_orders_7d), 0) as orders
+          from marts.mart_ppc_campaign_daily
+         where tenant_id = %s
+           and campaign_id = %s
+           and is_settled
+           and report_date >= %s
+           and report_date < %s
+        """,
+        (tenant_id, campaign_id, start, end),
+    ).fetchone()
+    return _window_from_row(row)
+
+
+def placement_window(conn, tenant_id: str, entity_id: str, start: dt.date, end: dt.date) -> MetricWindow:
+    campaign_id, placement = entity_id.split(":", 1)
+    row = conn.execute(
+        """
+        select coalesce(sum(cost), 0) as cost,
+               coalesce(sum(attributed_sales_7d), 0) as sales,
+               coalesce(sum(clicks), 0) as clicks,
+               coalesce(sum(attributed_orders_7d), 0) as orders
+          from marts.mart_ppc_placement_daily
+         where tenant_id = %s
+           and campaign_id = %s
+           and placement = %s
+           and is_settled
+           and report_date >= %s
+           and report_date < %s
+        """,
+        (tenant_id, campaign_id, placement, start, end),
+    ).fetchone()
+    return _window_from_row(row)
+
+
+def search_term_window(conn, tenant_id: str, search_term: str, start: dt.date, end: dt.date) -> MetricWindow:
+    row = conn.execute(
+        """
+        select coalesce(sum(cost), 0) as cost,
+               coalesce(sum(attributed_sales_7d), 0) as sales,
+               coalesce(sum(clicks), 0) as clicks,
+               coalesce(sum(attributed_orders_7d), 0) as orders
+          from marts.mart_ppc_search_term_daily
+         where tenant_id = %s
+           and search_term = %s
+           and is_settled
+           and report_date >= %s
+           and report_date < %s
+        """,
+        (tenant_id, search_term, start, end),
+    ).fetchone()
+    return _window_from_row(row)
 
 
 def judge(before: MetricWindow, after: MetricWindow) -> tuple[str, dict]:
@@ -120,21 +190,20 @@ def judge(before: MetricWindow, after: MetricWindow) -> tuple[str, dict]:
 def verify_action(conn, action: sm.Action, *, now: dt.datetime) -> sm.Action:
     assert action.applied_at is not None
     applied_date = action.applied_at.date()
-    before = keyword_window(
+    before = performance_window(
         conn,
-        action.tenant_id,
-        action.entity_id,
+        action,
         applied_date - dt.timedelta(days=WINDOW_DAYS),
         applied_date,
     )
-    after = keyword_window(
+    after = performance_window(
         conn,
-        action.tenant_id,
-        action.entity_id,
+        action,
         applied_date,
         applied_date + dt.timedelta(days=WINDOW_DAYS),
     )
     outcome, impact = judge(before, after)
+    impact["entity_type"] = action.entity_type
     updated = sm.verify(action, now=now, outcome=outcome, impact=impact)
     conn.execute(
         """
