@@ -41,8 +41,6 @@ def sp_client(region: str = "eu") -> sp_api.SpApiClient:
 
 
 def test_no_client_builds_an_uncatalogued_path():
-    """Fails on the first hand-built URL, which is the moment the catalog stops
-    describing what the system actually calls."""
     catalogued = ep.catalogued_paths(ep.Api.SP_API) | ep.catalogued_paths(ep.Api.ADS)
     offenders: list[str] = []
     for path in sorted(CLIENT_DIR.glob("*.py")):
@@ -106,7 +104,7 @@ def test_report_request_without_a_grain_is_refused():
     assert "grain" in str(exc.value)
 
 
-def test_sales_and_traffic_must_be_requested_at_child_granularity():
+def test_sales_and_traffic_must_be_requested_at_child_granularity(monkeypatch):
     today = dt.date.today()
     start, end = today - dt.timedelta(days=5), today - dt.timedelta(days=1)
     with pytest.raises(sp_api.AttributionGranularityError):
@@ -118,13 +116,33 @@ def test_sales_and_traffic_must_be_requested_at_child_granularity():
         )
     with pytest.raises(sp_api.AttributionGranularityError):
         sp_client().create_report(sp_api.SALES_AND_TRAFFIC, start, end, None)
-    with pytest.raises(NotImplementedError):
-        sp_client().create_report(
+
+    client = sp_client()
+    calls = []
+
+    def fake_call(endpoint, *, body):
+        calls.append((endpoint, body))
+        return {"reportId": "r-1"}
+
+    monkeypatch.setattr(client, "_call", fake_call)
+    monkeypatch.setattr(
+        "services.ingest.clients.rate_limit.acquire_report_type",
+        lambda _report_type: None,
+    )
+    assert (
+        client.create_report(
             sp_api.SALES_AND_TRAFFIC,
             start,
             end,
             {"dateGranularity": "DAY", "asinGranularity": "CHILD"},
         )
+        == "r-1"
+    )
+    assert calls[0][0] == "sp.reports.create"
+    assert calls[0][1]["reportOptions"] == {
+        "dateGranularity": "DAY",
+        "asinGranularity": "CHILD",
+    }
 
 
 def test_unknown_sp_report_type_is_refused_before_dispatch():
