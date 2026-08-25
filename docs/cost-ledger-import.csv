@@ -1,0 +1,2 @@
+sku,asin,valid_from,valid_to,cogs,freight_in,amazon_referral_pct,fba_fee,storage_est,vat_rate,currency,note
+HOOK-TAPE-001,B001EXAMPLE,2026-08-01,,4.25,0.35,0.15,2.10,0.05,0.20,GBP,example row
