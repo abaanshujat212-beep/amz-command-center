@@ -88,6 +88,60 @@ jobs:
       - name: Postgres-backed pytest
         run: pytest -q -m db
 
+  dbt-build:
+    name: dbt build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: axaty
+          POSTGRES_PASSWORD: axaty
+          POSTGRES_DB: axaty
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U axaty -d axaty"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://axaty:axaty@localhost:5432/axaty
+      KEK_BASE64: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      KEK_VERSION: '1'
+      DBT_PROFILES_DIR: ${{ github.workspace }}/packages/dbt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Apply migrations
+        run: python -m packages.db.migrate up
+
+      - name: Seed dev data
+        run: python -m packages.db.seed
+
+      - name: Write dbt profile
+        working-directory: packages/dbt
+        run: cp profiles.example.yml profiles.yml
+
+      - name: dbt deps
+        working-directory: packages/dbt
+        run: dbt deps
+
+      - name: dbt build
+        working-directory: packages/dbt
+        run: dbt build
+
   web-build:
     name: Web typecheck and build
     runs-on: ubuntu-latest

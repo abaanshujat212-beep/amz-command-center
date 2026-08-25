@@ -7,6 +7,7 @@ with source as (
 select
     tenant_id::uuid as tenant_id,
     report_date::date as report_date,
+    coalesce(record->>'child_asin', record->>'childAsin', record->>'asin', entity_id)::text as child_asin,
     coalesce(record->>'child_asin', record->>'childAsin', record->>'asin', entity_id)::text as asin,
     coalesce(record->>'parent_asin', record->>'parentAsin')::text as parent_asin,
     coalesce(record->>'sku', record->>'sellerSku')::text as sku,
