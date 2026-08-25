@@ -1,15 +1,17 @@
 import datetime as dt
 
 from services.actions import state_machine as sm
-from services.actions.verification import MetricWindow, judge, verify_action
+from services.actions.verification import MetricWindow, judge, placement_window, verify_action
 
 
 class FakeConn:
     def __init__(self, windows):
         self.windows = list(windows)
         self.updates = []
+        self.queries = []
 
     def execute(self, sql, params):
+        self.queries.append((sql, params))
         if sql.strip().startswith("update action"):
             self.updates.append((sql, params))
             return self
@@ -45,6 +47,13 @@ def test_judge_inconclusive_without_click_volume():
     assert outcome == "inconclusive"
 
 
+def test_placement_window_splits_entity_id():
+    conn = FakeConn([{"cost": 10, "sales": 20, "clicks": 11, "orders": 1}])
+    result = placement_window(conn, "t1", "c1:top_of_search", dt.date(2026, 8, 1), dt.date(2026, 8, 8))
+    assert result.cost == 10
+    assert conn.queries[0][1][1:3] == ("c1", "top_of_search")
+
+
 def test_verify_action_persists_verified_status():
     now = dt.datetime(2026, 8, 25, tzinfo=dt.timezone.utc)
     applied_at = now - dt.timedelta(days=8)
@@ -67,3 +76,5 @@ def test_verify_action_persists_verified_status():
     assert updated.status == sm.Status.VERIFIED
     assert updated.outcome == "improved"
     assert conn.updates
+    impact = conn.updates[0][1][3].obj
+    assert impact["entity_type"] == "keyword"
