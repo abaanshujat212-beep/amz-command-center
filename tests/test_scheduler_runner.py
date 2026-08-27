@@ -1,7 +1,7 @@
 import datetime as dt
 from types import SimpleNamespace
 
-from services.ingest.pipelines import sales_traffic
+from services.ingest.pipelines import ads_daily, sales_traffic
 from services.scheduler.runner import (
     Alert,
     CatchUpPlan,
@@ -63,6 +63,13 @@ def test_build_catch_up_plan_reports_missing_days_in_rolling_window():
     assert plans[0].days == 1
 
 
+def test_build_catch_up_plan_defaults_to_sales_and_ads_datasets():
+    plans = build_catch_up_plan(FakeConn([]), "tenant-1", today=dt.date(2026, 8, 24), days=1)
+    datasets = {plan.dataset for plan in plans}
+    assert sales_traffic.DATASET in datasets
+    assert set(ads_daily.DATASETS).issubset(datasets)
+
+
 def test_build_catch_up_plan_skips_complete_dataset():
     rows = [{"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 23)}]
     plans = build_catch_up_plan(
@@ -95,20 +102,40 @@ def test_replay_catch_up_plan_replays_supported_sales_traffic_window():
     assert result[0].dry_run is True
 
 
-def test_replay_catch_up_plan_leaves_unknown_dataset_planned_only():
+def test_replay_catch_up_plan_replays_supported_ads_dataset_window():
     calls = []
 
-    def run_sales(tenant_id, dry_run=True, today=None):
-        calls.append((tenant_id, dry_run, today))
+    def run_ads(tenant_id, dry_run=True, today=None, datasets=None):
+        calls.append((tenant_id, dry_run, today, datasets))
+        return SimpleNamespace(name="ads")
 
     result = replay_catch_up_plan(
         "tenant-1",
         [CatchUpPlan("ads_sp_campaign_daily", dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))],
         dry_run=True,
-        run_sales=run_sales,
+        run_ads=run_ads,
+    )
+    assert calls == [("tenant-1", True, dt.date(2026, 8, 23), ("ads_sp_campaign_daily",))]
+    assert result[0].dataset == "ads_sp_campaign_daily"
+    assert result[0].planned_days == 1
+    assert result[0].replayed is True
+    assert result[0].dry_run is True
+
+
+def test_replay_catch_up_plan_leaves_unknown_dataset_planned_only():
+    calls = []
+
+    def run_ads(tenant_id, dry_run=True, today=None, datasets=None):
+        calls.append((tenant_id, dry_run, today, datasets))
+
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [CatchUpPlan("unknown_daily", dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))],
+        dry_run=True,
+        run_ads=run_ads,
     )
     assert calls == []
-    assert result[0].dataset == "ads_sp_campaign_daily"
+    assert result[0].dataset == "unknown_daily"
     assert result[0].planned_days == 1
     assert result[0].replayed is False
 
