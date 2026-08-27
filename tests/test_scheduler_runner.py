@@ -1,10 +1,13 @@
 import datetime as dt
 from types import SimpleNamespace
 
+from services.ingest.pipelines import sales_traffic
 from services.scheduler.runner import (
     Alert,
+    CatchUpPlan,
     build_catch_up_plan,
     evaluate_alerts,
+    replay_catch_up_plan,
     run_ingestion,
     run_pipeline_cycle,
 )
@@ -70,6 +73,44 @@ def test_build_catch_up_plan_skips_complete_dataset():
         datasets=("sales_traffic_asin_daily",),
     )
     assert plans == []
+
+
+def test_replay_catch_up_plan_replays_supported_sales_traffic_window():
+    calls = []
+
+    def run_sales(tenant_id, dry_run=True, today=None):
+        calls.append((tenant_id, dry_run, today))
+        return SimpleNamespace(name="sales")
+
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [CatchUpPlan(sales_traffic.DATASET, dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))],
+        dry_run=True,
+        run_sales=run_sales,
+    )
+    assert calls == [("tenant-1", True, dt.date(2026, 8, 23))]
+    assert result[0].dataset == sales_traffic.DATASET
+    assert result[0].planned_days == 1
+    assert result[0].replayed is True
+    assert result[0].dry_run is True
+
+
+def test_replay_catch_up_plan_leaves_unknown_dataset_planned_only():
+    calls = []
+
+    def run_sales(tenant_id, dry_run=True, today=None):
+        calls.append((tenant_id, dry_run, today))
+
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [CatchUpPlan("ads_sp_campaign_daily", dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))],
+        dry_run=True,
+        run_sales=run_sales,
+    )
+    assert calls == []
+    assert result[0].dataset == "ads_sp_campaign_daily"
+    assert result[0].planned_days == 1
+    assert result[0].replayed is False
 
 
 def test_run_ingestion_invokes_ads_and_sales_jobs():

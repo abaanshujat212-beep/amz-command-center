@@ -39,6 +39,14 @@ class CatchUpPlan:
         return len(self.dates)
 
 
+@dataclass(frozen=True)
+class CatchUpReplayResult:
+    dataset: str
+    planned_days: int
+    replayed: bool
+    dry_run: bool
+
+
 def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
     rows = conn.execute(
         """
@@ -92,12 +100,7 @@ def build_catch_up_plan(
     days: int = DEFAULT_CATCH_UP_DAYS,
     datasets: tuple[str, ...] = ("sales_traffic_asin_daily",),
 ) -> list[CatchUpPlan]:
-    """Find missing successful pipeline days in the recent rolling window.
-
-    This is intentionally a planning seam: ingestion pipelines still own their
-    report request mechanics, while the scheduler can now detect gaps before a
-    replay/catch-up worker is wired to execute them.
-    """
+    """Find missing successful pipeline days in the recent rolling window."""
     if days < 1:
         raise ValueError("catch-up days must be at least 1")
     today = today or dt.date.today()
@@ -111,6 +114,36 @@ def build_catch_up_plan(
         if missing:
             plans.append(CatchUpPlan(dataset, missing[0], missing[-1], missing))
     return plans
+
+
+def replay_catch_up_plan(
+    tenant_id: str,
+    plans: list[CatchUpPlan],
+    *,
+    dry_run: bool = True,
+    run_sales: Callable[..., object] = sales_traffic.run,
+) -> list[CatchUpReplayResult]:
+    """Replay supported catch-up plans.
+
+    The first supported replay is Sales & Traffic because its pipeline already
+    accepts a deterministic `today` boundary. Unknown datasets stay planned-only
+    so the scheduler never guesses a write path.
+    """
+    results: list[CatchUpReplayResult] = []
+    for plan in plans:
+        replayed = False
+        if plan.dataset == sales_traffic.DATASET:
+            run_sales(tenant_id, dry_run=dry_run, today=plan.end + dt.timedelta(days=1))
+            replayed = True
+        results.append(
+            CatchUpReplayResult(
+                dataset=plan.dataset,
+                planned_days=plan.days,
+                replayed=replayed,
+                dry_run=dry_run,
+            )
+        )
+    return results
 
 
 def evaluate_alerts(
@@ -185,14 +218,20 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="Call Amazon clients instead of dry-run planning")
     parser.add_argument("--skip-rules", action="store_true", help="Only run ingestion jobs")
     parser.add_argument("--show-catch-up", action="store_true", help="Print missing successful days in the rolling catch-up window")
+    parser.add_argument("--replay-catch-up", action="store_true", help="Replay supported missing days in the catch-up window")
     parser.add_argument("--catch-up-days", type=int, default=DEFAULT_CATCH_UP_DAYS)
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
-    if args.show_catch_up:
+    if args.show_catch_up or args.replay_catch_up:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
-            for plan in build_catch_up_plan(conn, args.tenant_id, days=args.catch_up_days):
-                print(f"CATCH_UP {plan.dataset} {plan.start}..{plan.end} missing_days={plan.days}")
+            plans = build_catch_up_plan(conn, args.tenant_id, days=args.catch_up_days)
+        for plan in plans:
+            print(f"CATCH_UP {plan.dataset} {plan.start}..{plan.end} missing_days={plan.days}")
+        if args.replay_catch_up:
+            for result in replay_catch_up_plan(args.tenant_id, plans, dry_run=not args.live):
+                status = "replayed" if result.replayed else "planned_only"
+                print(f"CATCH_UP_REPLAY {result.dataset} {status} days={result.planned_days} dry_run={result.dry_run}")
     alerts = run_once(args.tenant_id, dry_run=not args.live, include_rules=not args.skip_rules)
     for alert in alerts:
         print(f"{alert.severity.upper()} {alert.dataset} {alert.kind}: {alert.message}")
