@@ -1,8 +1,30 @@
 version: 2
 
 models:
+  - name: mart_sqp_opportunity
+    description: Search Query Performance opportunity finder for query-level demand, conversion and harvest gaps.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: asin
+        tests: [not_null]
+      - name: search_query
+        tests: [not_null]
+      - name: sqp_opportunity_score
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+              severity: error
+      - name: suggested_action
+        tests:
+          - accepted_values:
+              values: [already_negative, harvest_exact, test_campaign, watch_spend, monitor]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, asin, search_query]
+
   - name: mart_product_opportunity
-    description: Product-level opportunity score using Sales & Traffic, ads, economics and Keepa snapshots.
     columns:
       - name: tenant_id
         tests: [not_null]
