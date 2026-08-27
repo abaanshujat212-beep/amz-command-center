@@ -16,6 +16,7 @@ from services.rules.runner import run_once as run_rules_once
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 DEFAULT_STALE_HOURS = 36
+DEFAULT_CATCH_UP_DAYS = 14
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,18 @@ class Alert:
     kind: str
     severity: str
     message: str
+
+
+@dataclass(frozen=True)
+class CatchUpPlan:
+    dataset: str
+    start: dt.date
+    end: dt.date
+    dates: tuple[dt.date, ...]
+
+    @property
+    def days(self) -> int:
+        return len(self.dates)
 
 
 def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
@@ -38,6 +51,66 @@ def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
         (tenant_id,),
     ).fetchall()
     return {r["dataset"]: r for r in rows}
+
+
+def _successful_run_dates(conn, tenant_id: str, dataset: str, start: dt.date, end: dt.date) -> set[dt.date]:
+    rows = conn.execute(
+        """
+        select date_from, date_to
+          from pipeline_run
+         where tenant_id = %s
+           and dataset = %s
+           and status = 'success'
+           and date_from is not null
+           and date_to is not null
+           and date_to >= %s
+           and date_from <= %s
+        """,
+        (tenant_id, dataset, start, end),
+    ).fetchall()
+    dates: set[dt.date] = set()
+    for row in rows:
+        current = max(row["date_from"], start)
+        last = min(row["date_to"], end)
+        while current <= last:
+            dates.add(current)
+            current += dt.timedelta(days=1)
+    return dates
+
+
+def _date_range(start: dt.date, end: dt.date) -> tuple[dt.date, ...]:
+    if start > end:
+        return ()
+    return tuple(start + dt.timedelta(days=i) for i in range((end - start).days + 1))
+
+
+def build_catch_up_plan(
+    conn,
+    tenant_id: str,
+    *,
+    today: dt.date | None = None,
+    days: int = DEFAULT_CATCH_UP_DAYS,
+    datasets: tuple[str, ...] = ("sales_traffic_asin_daily",),
+) -> list[CatchUpPlan]:
+    """Find missing successful pipeline days in the recent rolling window.
+
+    This is intentionally a planning seam: ingestion pipelines still own their
+    report request mechanics, while the scheduler can now detect gaps before a
+    replay/catch-up worker is wired to execute them.
+    """
+    if days < 1:
+        raise ValueError("catch-up days must be at least 1")
+    today = today or dt.date.today()
+    end = today - dt.timedelta(days=1)
+    start = end - dt.timedelta(days=days - 1)
+    expected = set(_date_range(start, end))
+    plans: list[CatchUpPlan] = []
+    for dataset in datasets:
+        present = _successful_run_dates(conn, tenant_id, dataset, start, end)
+        missing = tuple(sorted(expected - present))
+        if missing:
+            plans.append(CatchUpPlan(dataset, missing[0], missing[-1], missing))
+    return plans
 
 
 def evaluate_alerts(
@@ -111,9 +184,15 @@ def main() -> None:
     parser.add_argument("--tenant-id", default=os.environ.get("DEV_TENANT_ID"))
     parser.add_argument("--live", action="store_true", help="Call Amazon clients instead of dry-run planning")
     parser.add_argument("--skip-rules", action="store_true", help="Only run ingestion jobs")
+    parser.add_argument("--show-catch-up", action="store_true", help="Print missing successful days in the rolling catch-up window")
+    parser.add_argument("--catch-up-days", type=int, default=DEFAULT_CATCH_UP_DAYS)
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
+    if args.show_catch_up:
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
+            for plan in build_catch_up_plan(conn, args.tenant_id, days=args.catch_up_days):
+                print(f"CATCH_UP {plan.dataset} {plan.start}..{plan.end} missing_days={plan.days}")
     alerts = run_once(args.tenant_id, dry_run=not args.live, include_rules=not args.skip_rules)
     for alert in alerts:
         print(f"{alert.severity.upper()} {alert.dataset} {alert.kind}: {alert.message}")

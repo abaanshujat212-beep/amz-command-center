@@ -1,14 +1,22 @@
 import datetime as dt
 from types import SimpleNamespace
 
-from services.scheduler.runner import Alert, evaluate_alerts, run_ingestion, run_pipeline_cycle
+from services.scheduler.runner import (
+    Alert,
+    build_catch_up_plan,
+    evaluate_alerts,
+    run_ingestion,
+    run_pipeline_cycle,
+)
 
 
 class FakeConn:
     def __init__(self, rows):
         self.rows = rows
+        self.queries = []
 
-    def execute(self, _sql, _params):
+    def execute(self, sql, params):
+        self.queries.append((sql, params))
         return self
 
     def fetchall(self):
@@ -30,6 +38,38 @@ def test_evaluate_alerts_reports_stale_success():
     rows = [{"dataset": "sales_traffic_asin_daily", "status": "success", "started_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "finished_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "error": None}]
     alerts = evaluate_alerts(FakeConn(rows), "tenant-1", now=dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc), stale_hours=36, expected_datasets=("sales_traffic_asin_daily",))
     assert any(a.kind == "stale" for a in alerts)
+
+
+def test_build_catch_up_plan_reports_missing_days_in_rolling_window():
+    rows = [
+        {"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 21)},
+        {"date_from": dt.date(2026, 8, 23), "date_to": dt.date(2026, 8, 23)},
+    ]
+    plans = build_catch_up_plan(
+        FakeConn(rows),
+        "tenant-1",
+        today=dt.date(2026, 8, 24),
+        days=3,
+        datasets=("sales_traffic_asin_daily",),
+    )
+    assert len(plans) == 1
+    assert plans[0].dataset == "sales_traffic_asin_daily"
+    assert plans[0].start == dt.date(2026, 8, 22)
+    assert plans[0].end == dt.date(2026, 8, 22)
+    assert plans[0].dates == (dt.date(2026, 8, 22),)
+    assert plans[0].days == 1
+
+
+def test_build_catch_up_plan_skips_complete_dataset():
+    rows = [{"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 23)}]
+    plans = build_catch_up_plan(
+        FakeConn(rows),
+        "tenant-1",
+        today=dt.date(2026, 8, 24),
+        days=3,
+        datasets=("sales_traffic_asin_daily",),
+    )
+    assert plans == []
 
 
 def test_run_ingestion_invokes_ads_and_sales_jobs():
