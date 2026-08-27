@@ -11,7 +11,6 @@ sources:
     tables:
       - name: raw_ads_sp_campaign_daily
       - name: raw_ads_sp_placement_daily
-        description: Campaign report requested at placement grain; never additive with campaign grain.
       - name: raw_ads_sp_ad_group_daily
       - name: raw_ads_sp_keyword_daily
       - name: raw_ads_sp_search_term_daily
@@ -22,6 +21,8 @@ sources:
       - name: raw_ads_placement_config
         freshness: null
       - name: raw_keepa_product_snapshot
+        freshness: null
+      - name: raw_sqp_query_snapshot
         freshness: null
       - name: raw_sales_traffic_asin_daily
 
