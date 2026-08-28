@@ -30,6 +30,7 @@ class WorkerResult:
     applied: int = 0
     failed: int = 0
     rolled_back: int = 0
+    alerts_created: int = 0
 
 
 class DryRunActionClient:
@@ -173,6 +174,43 @@ def persist_apply_result(conn, action: sm.Action, api_response: dict | None = No
     )
 
 
+def persist_action_failure_alert(conn, action: sm.Action) -> bool:
+    """Create one open alert per failed action so dashboard operators see it."""
+    if action.status != sm.Status.FAILED:
+        return False
+    existing = conn.execute(
+        """
+        select id from alert
+         where tenant_id = %s and kind = 'action_failed' and entity_ref = %s and resolved_at is null
+         limit 1
+        """,
+        (action.tenant_id, action.id),
+    ).fetchone()
+    if existing is not None:
+        return False
+    conn.execute(
+        """
+        insert into alert (tenant_id, kind, severity, title, detail, entity_ref)
+        values (%s, 'action_failed', 'critical', %s, %s, %s)
+        """,
+        (
+            action.tenant_id,
+            f"Action {action.id} failed: {action.action_type}",
+            psycopg.types.json.Jsonb(
+                {
+                    "action_id": action.id,
+                    "entity_type": action.entity_type,
+                    "entity_id": action.entity_id,
+                    "action_type": action.action_type,
+                    "error": action.error,
+                }
+            ),
+            action.id,
+        ),
+    )
+    return True
+
+
 def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -> tuple[sm.Action, dict | None]:
     live_before = client.read_before_value(action)
     try:
@@ -210,6 +248,8 @@ def run_once(
                 result.applied += 1
             else:
                 result.failed += 1
+                if persist_action_failure_alert(conn, updated):
+                    result.alerts_created += 1
         if ads_client is not None:
             persist_rotated_refresh_token(conn, ads_client)
         conn.commit()
@@ -225,7 +265,10 @@ def main() -> None:
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
     result = run_once(args.tenant_id, limit=args.limit, live_ads=args.live_ads)
-    print(f"actions scanned={result.scanned} applied={result.applied} failed={result.failed}")
+    print(
+        f"actions scanned={result.scanned} applied={result.applied} "
+        f"failed={result.failed} alerts_created={result.alerts_created}"
+    )
 
 
 if __name__ == "__main__":
