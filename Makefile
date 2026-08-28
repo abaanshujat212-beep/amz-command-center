@@ -1,10 +1,11 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 # Migrations run from the host against DATABASE_URL, so .env has to be in the
 # environment of the python process, not just of docker compose.
 ENV := set -a; . ./.env; set +a;
 STEPS ?= 1
+TENANT_ID ?= $${DEV_TENANT_ID}
 
 help:
 	@echo "up                start postgres, redis, metabase"
@@ -23,6 +24,10 @@ help:
 	@echo "seed              insert tenants and the starter rules"
 	@echo "test              run pytest (includes the RLS isolation gate)"
 	@echo "dbt               run dbt build"
+	@echo ""
+	@echo "scheduler         run ingestion/rules scheduler once"
+	@echo "scheduler-history show recent pipeline run history"
+	@echo "scheduler-catch-up show rolling catch-up gaps"
 	@echo ""
 	@echo "clean             stop containers AND delete volumes (destructive)"
 
@@ -58,8 +63,6 @@ migrate-down:
 migrate-baseline:
 	@$(ENV) python -m packages.db.migrate baseline
 
-# The engine tests create tables in the marts schema, so they deliberately
-# refuse to touch DATABASE_URL and require TEST_DATABASE_URL instead.
 testdb:
 	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-axaty} -d postgres \
 		-c "create database $${TEST_DB_NAME:-axaty_test}" || echo "test database already exists"
@@ -81,6 +84,15 @@ lint:
 
 dbt:
 	cd packages/dbt && dbt build
+
+scheduler:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID)
+
+scheduler-history:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-history --skip-rules
+
+scheduler-catch-up:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-catch-up --skip-rules
 
 clean:
 	$(COMPOSE) down -v
