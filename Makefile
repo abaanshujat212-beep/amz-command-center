@@ -1,8 +1,6 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt actions actions-live scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
-# Migrations run from the host against DATABASE_URL, so .env has to be in the
-# environment of the python process, not just of docker compose.
 ENV := set -a; . ./.env; set +a;
 STEPS ?= 1
 TENANT_ID ?= $${DEV_TENANT_ID}
@@ -25,6 +23,8 @@ help:
 	@echo "test              run pytest (includes the RLS isolation gate)"
 	@echo "dbt               run dbt build"
 	@echo ""
+	@echo "actions           run approved-action worker in dry-run mode"
+	@echo "actions-live      run approved-action worker with live Ads writes"
 	@echo "scheduler         run ingestion/rules scheduler once"
 	@echo "scheduler-history show recent pipeline run history"
 	@echo "scheduler-catch-up show rolling catch-up gaps"
@@ -84,6 +84,12 @@ lint:
 
 dbt:
 	cd packages/dbt && dbt build
+
+actions:
+	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID)
+
+actions-live:
+	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID) --live-ads
 
 scheduler:
 	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID)
