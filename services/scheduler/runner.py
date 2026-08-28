@@ -17,6 +17,7 @@ from services.rules.runner import run_once as run_rules_once
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 DEFAULT_STALE_HOURS = 36
 DEFAULT_CATCH_UP_DAYS = 14
+DEFAULT_HISTORY_LIMIT = 10
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,20 @@ class CatchUpReplayResult:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class RunHistoryItem:
+    dataset: str
+    status: str
+    started_at: dt.datetime
+    finished_at: dt.datetime | None
+    rows_loaded: int | None
+    error: str | None
+
+    @property
+    def finished(self) -> bool:
+        return self.finished_at is not None
+
+
 def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
     rows = conn.execute(
         """
@@ -59,6 +74,32 @@ def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
         (tenant_id,),
     ).fetchall()
     return {r["dataset"]: r for r in rows}
+
+
+def load_run_history(conn, tenant_id: str, *, limit: int = DEFAULT_HISTORY_LIMIT) -> list[RunHistoryItem]:
+    if limit < 1:
+        raise ValueError("history limit must be at least 1")
+    rows = conn.execute(
+        """
+        select dataset, status, started_at, finished_at, rows_loaded, error
+          from pipeline_run
+         where tenant_id = %s
+         order by started_at desc
+         limit %s
+        """,
+        (tenant_id, limit),
+    ).fetchall()
+    return [
+        RunHistoryItem(
+            dataset=row["dataset"],
+            status=row["status"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            rows_loaded=row["rows_loaded"],
+            error=row["error"],
+        )
+        for row in rows
+    ]
 
 
 def _successful_run_dates(conn, tenant_id: str, dataset: str, start: dt.date, end: dt.date) -> set[dt.date]:
@@ -224,10 +265,20 @@ def main() -> None:
     parser.add_argument("--skip-rules", action="store_true", help="Only run ingestion jobs")
     parser.add_argument("--show-catch-up", action="store_true", help="Print missing successful days in the rolling catch-up window")
     parser.add_argument("--replay-catch-up", action="store_true", help="Replay supported missing days in the catch-up window")
+    parser.add_argument("--show-history", action="store_true", help="Print recent pipeline run history")
+    parser.add_argument("--history-limit", type=int, default=DEFAULT_HISTORY_LIMIT)
     parser.add_argument("--catch-up-days", type=int, default=DEFAULT_CATCH_UP_DAYS)
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
+    if args.show_history:
+        with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
+            for item in load_run_history(conn, args.tenant_id, limit=args.history_limit):
+                finished = item.finished_at.isoformat() if item.finished_at else "running"
+                error = f" error={item.error}" if item.error else ""
+                print(
+                    f"RUN_HISTORY {item.dataset} status={item.status} started={item.started_at.isoformat()} finished={finished} rows={item.rows_loaded}{error}"
+                )
     if args.show_catch_up or args.replay_catch_up:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
             plans = build_catch_up_plan(conn, args.tenant_id, days=args.catch_up_days)
