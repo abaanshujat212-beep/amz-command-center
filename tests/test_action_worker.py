@@ -1,7 +1,12 @@
 import datetime as dt
 
 from services.actions import state_machine as sm
-from services.actions.worker import DryRunActionClient, apply_action, persist_action_failure_alert
+from services.actions.worker import (
+    DryRunActionClient,
+    apply_action,
+    persist_action_failure_alert,
+    persist_auth_failure_alert,
+)
 
 
 class FailingClient:
@@ -80,8 +85,8 @@ def test_persist_action_failure_alert_inserts_for_failed_action():
     action.status = sm.Status.FAILED
     action.error = "amazon down"
     assert persist_action_failure_alert(conn, action) is True
-    assert conn.queries[-1][1][1].startswith("Action A1 failed")
-    assert conn.queries[-1][1][3] == "A1"
+    assert conn.queries[-1][1][3].startswith("Action A1 failed")
+    assert conn.queries[-1][1][5] == "A1"
 
 
 def test_persist_action_failure_alert_skips_existing_open_alert():
@@ -98,3 +103,16 @@ def test_persist_action_failure_alert_skips_non_failed_action():
     action = _approved_action()
     assert persist_action_failure_alert(conn, action) is False
     assert conn.queries == []
+
+
+def test_persist_auth_failure_alert_inserts_provider_alert():
+    conn = FakeConn()
+    assert persist_auth_failure_alert(conn, "T1", "missing token") is True
+    assert conn.queries[-1][1][1] == "auth_expired"
+    assert conn.queries[-1][1][5] == "ads_api"
+
+
+def test_persist_auth_failure_alert_skips_duplicate_provider_alert():
+    conn = FakeConn([{"id": "alert-1"}])
+    assert persist_auth_failure_alert(conn, "T1", "missing token") is False
+    assert len(conn.queries) == 1

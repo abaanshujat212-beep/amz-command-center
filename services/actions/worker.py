@@ -174,41 +174,67 @@ def persist_apply_result(conn, action: sm.Action, api_response: dict | None = No
     )
 
 
-def persist_action_failure_alert(conn, action: sm.Action) -> bool:
-    """Create one open alert per failed action so dashboard operators see it."""
-    if action.status != sm.Status.FAILED:
-        return False
+def persist_worker_alert(
+    conn,
+    tenant_id: str,
+    *,
+    kind: str,
+    severity: str,
+    title: str,
+    entity_ref: str,
+    detail: dict,
+) -> bool:
     existing = conn.execute(
         """
         select id from alert
-         where tenant_id = %s and kind = 'action_failed' and entity_ref = %s and resolved_at is null
+         where tenant_id = %s and kind = %s and entity_ref = %s and resolved_at is null
          limit 1
         """,
-        (action.tenant_id, action.id),
+        (tenant_id, kind, entity_ref),
     ).fetchone()
     if existing is not None:
         return False
     conn.execute(
         """
         insert into alert (tenant_id, kind, severity, title, detail, entity_ref)
-        values (%s, 'action_failed', 'critical', %s, %s, %s)
+        values (%s, %s, %s, %s, %s, %s)
         """,
-        (
-            action.tenant_id,
-            f"Action {action.id} failed: {action.action_type}",
-            psycopg.types.json.Jsonb(
-                {
-                    "action_id": action.id,
-                    "entity_type": action.entity_type,
-                    "entity_id": action.entity_id,
-                    "action_type": action.action_type,
-                    "error": action.error,
-                }
-            ),
-            action.id,
-        ),
+        (tenant_id, kind, severity, title, psycopg.types.json.Jsonb(detail), entity_ref),
     )
     return True
+
+
+def persist_action_failure_alert(conn, action: sm.Action) -> bool:
+    """Create one open alert per failed action so dashboard operators see it."""
+    if action.status != sm.Status.FAILED:
+        return False
+    return persist_worker_alert(
+        conn,
+        action.tenant_id,
+        kind="action_failed",
+        severity="critical",
+        title=f"Action {action.id} failed: {action.action_type}",
+        entity_ref=action.id,
+        detail={
+            "action_id": action.id,
+            "entity_type": action.entity_type,
+            "entity_id": action.entity_id,
+            "action_type": action.action_type,
+            "error": action.error,
+        },
+    )
+
+
+def persist_auth_failure_alert(conn, tenant_id: str, error: str) -> bool:
+    return persist_worker_alert(
+        conn,
+        tenant_id,
+        kind="auth_expired",
+        severity="critical",
+        title="Ads action worker could not load credentials",
+        entity_ref="ads_api",
+        detail={"provider": "ads_api", "error": error},
+    )
 
 
 def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -> tuple[sm.Action, dict | None]:
@@ -235,7 +261,13 @@ def run_once(
         ads_client = None
         if client is None:
             if live_ads:
-                ads_client = load_ads_client(conn, tenant_id)
+                try:
+                    ads_client = load_ads_client(conn, tenant_id)
+                except RuntimeError as exc:
+                    if persist_auth_failure_alert(conn, tenant_id, str(exc)):
+                        result.alerts_created += 1
+                    conn.commit()
+                    return result
                 client = AdsActionClient(ads_client)
             else:
                 client = DryRunActionClient()
