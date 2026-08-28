@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
-from dataclasses import dataclass
+import uuid
+from dataclasses import asdict, dataclass
 from typing import Protocol
 
 import psycopg
@@ -16,6 +17,7 @@ from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
+DATASET = "action_worker"
 
 
 class ActionClient(Protocol):
@@ -110,6 +112,32 @@ def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
         (tenant_id, limit),
     ).fetchall()
     return [_to_action(r) for r in rows]
+
+
+def start_worker_run(conn, tenant_id: str) -> uuid.UUID:
+    row = conn.execute(
+        "insert into pipeline_run (tenant_id, dataset, status) values (%s, %s, 'running') returning id",
+        (tenant_id, DATASET),
+    ).fetchone()
+    return row["id"]
+
+
+def finish_worker_run(conn, run_id: uuid.UUID, result: WorkerResult, error: str | None = None) -> None:
+    status = "failed" if error or result.failed else "success"
+    conn.execute(
+        """
+        update pipeline_run
+           set finished_at = now(), status = %s, rows_loaded = %s, error = %s, detail = %s
+         where id = %s
+        """,
+        (
+            status,
+            result.applied,
+            error,
+            psycopg.types.json.Jsonb(asdict(result)),
+            run_id,
+        ),
+    )
 
 
 def load_ads_client(conn, tenant_id: str) -> AdsClient:
@@ -258,33 +286,41 @@ def run_once(
     now = dt.datetime.now(dt.timezone.utc)
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
         conn.execute("select set_tenant(%s)", (tenant_id,))
+        run_id = start_worker_run(conn, tenant_id)
         ads_client = None
-        if client is None:
-            if live_ads:
-                try:
-                    ads_client = load_ads_client(conn, tenant_id)
-                except RuntimeError as exc:
-                    if persist_auth_failure_alert(conn, tenant_id, str(exc)):
+        try:
+            if client is None:
+                if live_ads:
+                    try:
+                        ads_client = load_ads_client(conn, tenant_id)
+                    except RuntimeError as exc:
+                        if persist_auth_failure_alert(conn, tenant_id, str(exc)):
+                            result.alerts_created += 1
+                        finish_worker_run(conn, run_id, result, error=str(exc))
+                        conn.commit()
+                        return result
+                    client = AdsActionClient(ads_client)
+                else:
+                    client = DryRunActionClient()
+            actions = fetch_approved(conn, tenant_id, limit)
+            result.scanned = len(actions)
+            for action in actions:
+                updated, response = apply_action(action, client, now=now)
+                persist_apply_result(conn, updated, response)
+                if updated.status == sm.Status.APPLIED:
+                    result.applied += 1
+                else:
+                    result.failed += 1
+                    if persist_action_failure_alert(conn, updated):
                         result.alerts_created += 1
-                    conn.commit()
-                    return result
-                client = AdsActionClient(ads_client)
-            else:
-                client = DryRunActionClient()
-        actions = fetch_approved(conn, tenant_id, limit)
-        result.scanned = len(actions)
-        for action in actions:
-            updated, response = apply_action(action, client, now=now)
-            persist_apply_result(conn, updated, response)
-            if updated.status == sm.Status.APPLIED:
-                result.applied += 1
-            else:
-                result.failed += 1
-                if persist_action_failure_alert(conn, updated):
-                    result.alerts_created += 1
-        if ads_client is not None:
-            persist_rotated_refresh_token(conn, ads_client)
-        conn.commit()
+            if ads_client is not None:
+                persist_rotated_refresh_token(conn, ads_client)
+            finish_worker_run(conn, run_id, result)
+            conn.commit()
+        except Exception as exc:
+            finish_worker_run(conn, run_id, result, error=str(exc))
+            conn.commit()
+            raise
     return result
 
 
