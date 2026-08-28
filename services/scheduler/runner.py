@@ -98,7 +98,7 @@ def build_catch_up_plan(
     *,
     today: dt.date | None = None,
     days: int = DEFAULT_CATCH_UP_DAYS,
-    datasets: tuple[str, ...] = ("sales_traffic_asin_daily",),
+    datasets: tuple[str, ...] | None = None,
 ) -> list[CatchUpPlan]:
     """Find missing successful pipeline days in the recent rolling window."""
     if days < 1:
@@ -107,8 +107,9 @@ def build_catch_up_plan(
     end = today - dt.timedelta(days=1)
     start = end - dt.timedelta(days=days - 1)
     expected = set(_date_range(start, end))
+    selected = datasets or (sales_traffic.DATASET, *ads_daily.DATASETS.keys())
     plans: list[CatchUpPlan] = []
-    for dataset in datasets:
+    for dataset in selected:
         present = _successful_run_dates(conn, tenant_id, dataset, start, end)
         missing = tuple(sorted(expected - present))
         if missing:
@@ -121,19 +122,23 @@ def replay_catch_up_plan(
     plans: list[CatchUpPlan],
     *,
     dry_run: bool = True,
+    run_ads: Callable[..., object] = ads_daily.run,
     run_sales: Callable[..., object] = sales_traffic.run,
 ) -> list[CatchUpReplayResult]:
-    """Replay supported catch-up plans.
-
-    The first supported replay is Sales & Traffic because its pipeline already
-    accepts a deterministic `today` boundary. Unknown datasets stay planned-only
-    so the scheduler never guesses a write path.
-    """
+    """Replay supported catch-up plans through existing pipeline boundaries."""
     results: list[CatchUpReplayResult] = []
     for plan in plans:
         replayed = False
         if plan.dataset == sales_traffic.DATASET:
             run_sales(tenant_id, dry_run=dry_run, today=plan.end + dt.timedelta(days=1))
+            replayed = True
+        elif plan.dataset in ads_daily.DATASETS:
+            run_ads(
+                tenant_id,
+                dry_run=dry_run,
+                today=plan.end + dt.timedelta(days=1),
+                datasets=(plan.dataset,),
+            )
             replayed = True
         results.append(
             CatchUpReplayResult(
