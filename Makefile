@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt actions actions-live clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt actions actions-live scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -25,6 +25,9 @@ help:
 	@echo ""
 	@echo "actions           run approved-action worker in dry-run mode"
 	@echo "actions-live      run approved-action worker with live Ads writes"
+	@echo "scheduler         run ingestion/rules scheduler once"
+	@echo "scheduler-history show recent pipeline run history"
+	@echo "scheduler-catch-up show rolling catch-up gaps"
 	@echo ""
 	@echo "clean             stop containers AND delete volumes (destructive)"
 
@@ -87,6 +90,15 @@ actions:
 
 actions-live:
 	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID) --live-ads
+
+scheduler:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID)
+
+scheduler-history:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-history --skip-rules
+
+scheduler-catch-up:
+	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-catch-up --skip-rules
 
 clean:
 	$(COMPOSE) down -v
