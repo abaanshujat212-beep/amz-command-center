@@ -1,7 +1,7 @@
 import datetime as dt
 
 from services.actions import state_machine as sm
-from services.actions.worker import DryRunActionClient, apply_action
+from services.actions.worker import DryRunActionClient, apply_action, persist_action_failure_alert
 
 
 class FailingClient:
@@ -24,6 +24,19 @@ class DriftClient:
 
     def rollback(self, action):
         return {}
+
+
+class FakeConn:
+    def __init__(self, rows=None):
+        self.rows = rows or []
+        self.queries = []
+
+    def execute(self, sql, params):
+        self.queries.append((sql, params))
+        return self
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
 
 
 def _approved_action():
@@ -59,3 +72,29 @@ def test_live_drift_fails_without_overwriting():
     action, _response = apply_action(_approved_action(), DriftClient(), now=dt.datetime.now(dt.timezone.utc))
     assert action.status == sm.Status.FAILED
     assert "drift" in action.error
+
+
+def test_persist_action_failure_alert_inserts_for_failed_action():
+    conn = FakeConn()
+    action = _approved_action()
+    action.status = sm.Status.FAILED
+    action.error = "amazon down"
+    assert persist_action_failure_alert(conn, action) is True
+    assert conn.queries[-1][1][1].startswith("Action A1 failed")
+    assert conn.queries[-1][1][3] == "A1"
+
+
+def test_persist_action_failure_alert_skips_existing_open_alert():
+    conn = FakeConn([{"id": "alert-1"}])
+    action = _approved_action()
+    action.status = sm.Status.FAILED
+    action.error = "amazon down"
+    assert persist_action_failure_alert(conn, action) is False
+    assert len(conn.queries) == 1
+
+
+def test_persist_action_failure_alert_skips_non_failed_action():
+    conn = FakeConn()
+    action = _approved_action()
+    assert persist_action_failure_alert(conn, action) is False
+    assert conn.queries == []
