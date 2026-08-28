@@ -4,8 +4,11 @@ from services.actions import state_machine as sm
 from services.actions.worker import (
     DryRunActionClient,
     apply_action,
+    finish_worker_run,
     persist_action_failure_alert,
     persist_auth_failure_alert,
+    start_worker_run,
+    WorkerResult,
 )
 
 
@@ -77,6 +80,30 @@ def test_live_drift_fails_without_overwriting():
     action, _response = apply_action(_approved_action(), DriftClient(), now=dt.datetime.now(dt.timezone.utc))
     assert action.status == sm.Status.FAILED
     assert "drift" in action.error
+
+
+def test_start_worker_run_records_running_action_worker_dataset():
+    conn = FakeConn([{"id": "run-1"}])
+    assert start_worker_run(conn, "T1") == "run-1"
+    assert conn.queries[0][1] == ("T1", "action_worker")
+
+
+def test_finish_worker_run_records_success_summary():
+    conn = FakeConn()
+    finish_worker_run(conn, "run-1", WorkerResult(scanned=2, applied=2))
+    params = conn.queries[0][1]
+    assert params[0] == "success"
+    assert params[1] == 2
+    assert params[2] is None
+    assert params[4] == "run-1"
+
+
+def test_finish_worker_run_records_failed_summary():
+    conn = FakeConn()
+    finish_worker_run(conn, "run-1", WorkerResult(scanned=2, applied=1, failed=1))
+    params = conn.queries[0][1]
+    assert params[0] == "failed"
+    assert params[1] == 1
 
 
 def test_persist_action_failure_alert_inserts_for_failed_action():
