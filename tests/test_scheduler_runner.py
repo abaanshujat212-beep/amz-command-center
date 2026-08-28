@@ -40,14 +40,31 @@ def test_evaluate_alerts_reports_missing_dataset():
 
 
 def test_evaluate_alerts_reports_failed_latest_run():
-    rows = [{"dataset": "sales_traffic_asin_daily", "status": "failed", "started_at": dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc), "finished_at": dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc), "error": "boom"}]
+    rows = [
+        {
+            "dataset": "sales_traffic_asin_daily",
+            "status": "failed",
+            "started_at": dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "finished_at": dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "error": "boom",
+        }
+    ]
     alerts = evaluate_alerts(FakeConn(rows), "tenant-1", expected_datasets=("sales_traffic_asin_daily",))
-    assert Alert("sales_traffic_asin_daily", "failed", "critical", "sales_traffic_asin_daily last run ended failed: boom") in alerts
+    assert Alert(
+        "sales_traffic_asin_daily",
+        "failed",
+        "critical",
+        "sales_traffic_asin_daily last run ended failed: boom",
+    ) in alerts
 
 
 def test_persist_alerts_inserts_missing_open_alerts():
     conn = FakeConn([])
-    inserted = persist_alerts(conn, "tenant-1", [Alert("sales_traffic_asin_daily", "stale", "warning", "old")])
+    inserted = persist_alerts(
+        conn,
+        "tenant-1",
+        [Alert("sales_traffic_asin_daily", "stale", "warning", "old")],
+    )
     assert inserted == 1
     assert conn.queries[-1][1][1] == "data_stale"
     assert conn.queries[-1][1][5] == "sales_traffic_asin_daily"
@@ -55,21 +72,50 @@ def test_persist_alerts_inserts_missing_open_alerts():
 
 def test_persist_alerts_skips_existing_open_alerts():
     conn = FakeConn([{"id": "alert-1"}])
-    inserted = persist_alerts(conn, "tenant-1", [Alert("sales_traffic_asin_daily", "failed", "critical", "boom")])
+    inserted = persist_alerts(
+        conn,
+        "tenant-1",
+        [Alert("sales_traffic_asin_daily", "failed", "critical", "boom")],
+    )
     assert inserted == 0
     assert len(conn.queries) == 1
 
 
 def test_evaluate_alerts_reports_stale_success():
-    rows = [{"dataset": "sales_traffic_asin_daily", "status": "success", "started_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "finished_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "error": None}]
-    alerts = evaluate_alerts(FakeConn(rows), "tenant-1", now=dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc), stale_hours=36, expected_datasets=("sales_traffic_asin_daily",))
+    rows = [
+        {
+            "dataset": "sales_traffic_asin_daily",
+            "status": "success",
+            "started_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc),
+            "finished_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc),
+            "error": None,
+        }
+    ]
+    alerts = evaluate_alerts(
+        FakeConn(rows),
+        "tenant-1",
+        now=dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+        stale_hours=36,
+        expected_datasets=("sales_traffic_asin_daily",),
+    )
     assert any(a.kind == "stale" for a in alerts)
 
 
 def test_load_run_history_maps_recent_runs():
     started = dt.datetime(2026, 8, 24, 10, tzinfo=dt.timezone.utc)
     finished = dt.datetime(2026, 8, 24, 10, 5, tzinfo=dt.timezone.utc)
-    conn = FakeConn([{"dataset": "sales_traffic_asin_daily", "status": "success", "started_at": started, "finished_at": finished, "rows_loaded": 42, "error": None}])
+    conn = FakeConn(
+        [
+            {
+                "dataset": "sales_traffic_asin_daily",
+                "status": "success",
+                "started_at": started,
+                "finished_at": finished,
+                "rows_loaded": 42,
+                "error": None,
+            }
+        ]
+    )
     history = load_run_history(conn, "tenant-1", limit=5)
     assert history == [RunHistoryItem("sales_traffic_asin_daily", "success", started, finished, 42, None)]
     assert history[0].finished is True
@@ -82,8 +128,17 @@ def test_load_run_history_rejects_invalid_limit():
 
 
 def test_build_catch_up_plan_reports_missing_days_in_rolling_window():
-    rows = [{"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 21)}, {"date_from": dt.date(2026, 8, 23), "date_to": dt.date(2026, 8, 23)}]
-    plans = build_catch_up_plan(FakeConn(rows), "tenant-1", today=dt.date(2026, 8, 24), days=3, datasets=("sales_traffic_asin_daily",))
+    rows = [
+        {"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 21)},
+        {"date_from": dt.date(2026, 8, 23), "date_to": dt.date(2026, 8, 23)},
+    ]
+    plans = build_catch_up_plan(
+        FakeConn(rows),
+        "tenant-1",
+        today=dt.date(2026, 8, 24),
+        days=3,
+        datasets=("sales_traffic_asin_daily",),
+    )
     assert len(plans) == 1
     assert plans[0].dataset == "sales_traffic_asin_daily"
     assert plans[0].start == dt.date(2026, 8, 22)
@@ -101,40 +156,92 @@ def test_build_catch_up_plan_defaults_to_sales_and_ads_datasets():
 
 def test_build_catch_up_plan_skips_complete_dataset():
     rows = [{"date_from": dt.date(2026, 8, 21), "date_to": dt.date(2026, 8, 23)}]
-    plans = build_catch_up_plan(FakeConn(rows), "tenant-1", today=dt.date(2026, 8, 24), days=3, datasets=("sales_traffic_asin_daily",))
+    plans = build_catch_up_plan(
+        FakeConn(rows),
+        "tenant-1",
+        today=dt.date(2026, 8, 24),
+        days=3,
+        datasets=("sales_traffic_asin_daily",),
+    )
     assert plans == []
 
 
 def test_replay_catch_up_plan_replays_supported_sales_traffic_window():
     calls = []
+
     def run_sales(tenant_id, dry_run=True, today=None):
-        calls.append((tenant_id, dry_run, today)); return SimpleNamespace(name="sales")
-    result = replay_catch_up_plan("tenant-1", [CatchUpPlan(sales_traffic.DATASET, dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))], dry_run=True, run_sales=run_sales)
+        calls.append((tenant_id, dry_run, today))
+        return SimpleNamespace(name="sales")
+
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [
+            CatchUpPlan(
+                sales_traffic.DATASET,
+                dt.date(2026, 8, 22),
+                dt.date(2026, 8, 22),
+                (dt.date(2026, 8, 22),),
+            )
+        ],
+        dry_run=True,
+        run_sales=run_sales,
+    )
     assert calls == [("tenant-1", True, dt.date(2026, 8, 23))]
     assert result[0].replayed is True
 
 
 def test_replay_catch_up_plan_replays_supported_ads_dataset_window():
     calls = []
+
     def run_ads(tenant_id, dry_run=True, today=None, datasets=None):
-        calls.append((tenant_id, dry_run, today, datasets)); return SimpleNamespace(name="ads")
-    result = replay_catch_up_plan("tenant-1", [CatchUpPlan("ads_sp_campaign_daily", dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))], dry_run=True, run_ads=run_ads)
+        calls.append((tenant_id, dry_run, today, datasets))
+        return SimpleNamespace(name="ads")
+
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [
+            CatchUpPlan(
+                "ads_sp_campaign_daily",
+                dt.date(2026, 8, 22),
+                dt.date(2026, 8, 22),
+                (dt.date(2026, 8, 22),),
+            )
+        ],
+        dry_run=True,
+        run_ads=run_ads,
+    )
     assert calls == [("tenant-1", True, dt.date(2026, 8, 23), ("ads_sp_campaign_daily",))]
     assert result[0].replayed is True
 
 
 def test_replay_catch_up_plan_leaves_unknown_dataset_planned_only():
-    result = replay_catch_up_plan("tenant-1", [CatchUpPlan("unknown_daily", dt.date(2026, 8, 22), dt.date(2026, 8, 22), (dt.date(2026, 8, 22),))], dry_run=True)
+    result = replay_catch_up_plan(
+        "tenant-1",
+        [
+            CatchUpPlan(
+                "unknown_daily",
+                dt.date(2026, 8, 22),
+                dt.date(2026, 8, 22),
+                (dt.date(2026, 8, 22),),
+            )
+        ],
+        dry_run=True,
+    )
     assert result[0].dataset == "unknown_daily"
     assert result[0].replayed is False
 
 
 def test_run_ingestion_invokes_ads_and_sales_jobs():
     calls = []
+
     def ads(tenant_id, dry_run=True):
-        calls.append(("ads", tenant_id, dry_run)); return SimpleNamespace(name="ads")
+        calls.append(("ads", tenant_id, dry_run))
+        return SimpleNamespace(name="ads")
+
     def sales(tenant_id, dry_run=True):
-        calls.append(("sales", tenant_id, dry_run)); return SimpleNamespace(name="sales")
+        calls.append(("sales", tenant_id, dry_run))
+        return SimpleNamespace(name="sales")
+
     result = run_ingestion("tenant-1", dry_run=True, run_ads=ads, run_sales=sales)
     assert [r.name for r in result] == ["ads", "sales"]
     assert calls == [("ads", "tenant-1", True), ("sales", "tenant-1", True)]
@@ -142,12 +249,25 @@ def test_run_ingestion_invokes_ads_and_sales_jobs():
 
 def test_run_pipeline_cycle_invokes_ingestion_then_rules():
     calls = []
+
     def ads(tenant_id, dry_run=True):
-        calls.append(("ads", tenant_id, dry_run)); return SimpleNamespace(name="ads")
+        calls.append(("ads", tenant_id, dry_run))
+        return SimpleNamespace(name="ads")
+
     def sales(tenant_id, dry_run=True):
-        calls.append(("sales", tenant_id, dry_run)); return SimpleNamespace(name="sales")
+        calls.append(("sales", tenant_id, dry_run))
+        return SimpleNamespace(name="sales")
+
     def rules(tenant_id):
-        calls.append(("rules", tenant_id)); return SimpleNamespace(name="rules")
-    result = run_pipeline_cycle("tenant-1", dry_run=True, run_ads=ads, run_sales=sales, run_rules=rules)
+        calls.append(("rules", tenant_id))
+        return SimpleNamespace(name="rules")
+
+    result = run_pipeline_cycle(
+        "tenant-1",
+        dry_run=True,
+        run_ads=ads,
+        run_sales=sales,
+        run_rules=rules,
+    )
     assert [r.name for r in result] == ["ads", "sales", "rules"]
     assert calls == [("ads", "tenant-1", True), ("sales", "tenant-1", True), ("rules", "tenant-1")]
