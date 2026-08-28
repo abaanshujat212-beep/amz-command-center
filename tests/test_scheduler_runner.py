@@ -1,12 +1,16 @@
 import datetime as dt
 from types import SimpleNamespace
 
+import pytest
+
 from services.ingest.pipelines import ads_daily, sales_traffic
 from services.scheduler.runner import (
     Alert,
     CatchUpPlan,
+    RunHistoryItem,
     build_catch_up_plan,
     evaluate_alerts,
+    load_run_history,
     replay_catch_up_plan,
     run_ingestion,
     run_pipeline_cycle,
@@ -41,6 +45,32 @@ def test_evaluate_alerts_reports_stale_success():
     rows = [{"dataset": "sales_traffic_asin_daily", "status": "success", "started_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "finished_at": dt.datetime(2026, 8, 20, tzinfo=dt.timezone.utc), "error": None}]
     alerts = evaluate_alerts(FakeConn(rows), "tenant-1", now=dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc), stale_hours=36, expected_datasets=("sales_traffic_asin_daily",))
     assert any(a.kind == "stale" for a in alerts)
+
+
+def test_load_run_history_maps_recent_runs():
+    started = dt.datetime(2026, 8, 24, 10, tzinfo=dt.timezone.utc)
+    finished = dt.datetime(2026, 8, 24, 10, 5, tzinfo=dt.timezone.utc)
+    conn = FakeConn([
+        {
+            "dataset": "sales_traffic_asin_daily",
+            "status": "success",
+            "started_at": started,
+            "finished_at": finished,
+            "rows_loaded": 42,
+            "error": None,
+        }
+    ])
+    history = load_run_history(conn, "tenant-1", limit=5)
+    assert history == [
+        RunHistoryItem("sales_traffic_asin_daily", "success", started, finished, 42, None)
+    ]
+    assert history[0].finished is True
+    assert conn.queries[0][1] == ("tenant-1", 5)
+
+
+def test_load_run_history_rejects_invalid_limit():
+    with pytest.raises(ValueError, match="history limit"):
+        load_run_history(FakeConn([]), "tenant-1", limit=0)
 
 
 def test_build_catch_up_plan_reports_missing_days_in_rolling_window():
