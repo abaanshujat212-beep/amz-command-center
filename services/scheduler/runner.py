@@ -76,7 +76,12 @@ def _latest_runs(conn, tenant_id: str) -> dict[str, dict]:
     return {r["dataset"]: r for r in rows}
 
 
-def load_run_history(conn, tenant_id: str, *, limit: int = DEFAULT_HISTORY_LIMIT) -> list[RunHistoryItem]:
+def load_run_history(
+    conn,
+    tenant_id: str,
+    *,
+    limit: int = DEFAULT_HISTORY_LIMIT,
+) -> list[RunHistoryItem]:
     if limit < 1:
         raise ValueError("history limit must be at least 1")
     rows = conn.execute(
@@ -91,15 +96,50 @@ def load_run_history(conn, tenant_id: str, *, limit: int = DEFAULT_HISTORY_LIMIT
     ).fetchall()
     return [
         RunHistoryItem(
-            dataset=row["dataset"],
-            status=row["status"],
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
-            rows_loaded=row["rows_loaded"],
-            error=row["error"],
+            row["dataset"],
+            row["status"],
+            row["started_at"],
+            row["finished_at"],
+            row["rows_loaded"],
+            row["error"],
         )
         for row in rows
     ]
+
+
+def persist_alerts(conn, tenant_id: str, alerts: list[Alert]) -> int:
+    """Persist current scheduler alerts without duplicating already-open rows."""
+    inserted = 0
+    for alert in alerts:
+        kind = "pipeline_failed" if alert.kind in {"failed", "running", "missing"} else "data_stale"
+        existing = conn.execute(
+            """
+            select id from alert
+             where tenant_id = %s and kind = %s and entity_ref = %s and resolved_at is null
+             limit 1
+            """,
+            (tenant_id, kind, alert.dataset),
+        ).fetchone()
+        if existing is not None:
+            continue
+        conn.execute(
+            """
+            insert into alert (tenant_id, kind, severity, title, detail, entity_ref)
+            values (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                tenant_id,
+                kind,
+                alert.severity,
+                alert.message,
+                psycopg.types.json.Jsonb(
+                    {"dataset": alert.dataset, "scheduler_kind": alert.kind}
+                ),
+                alert.dataset,
+            ),
+        )
+        inserted += 1
+    return inserted
 
 
 def _successful_run_dates(conn, tenant_id: str, dataset: str, start: dt.date, end: dt.date) -> set[dt.date]:
@@ -141,7 +181,6 @@ def build_catch_up_plan(
     days: int = DEFAULT_CATCH_UP_DAYS,
     datasets: tuple[str, ...] | None = None,
 ) -> list[CatchUpPlan]:
-    """Find missing successful pipeline days in the recent rolling window."""
     if days < 1:
         raise ValueError("catch-up days must be at least 1")
     today = today or dt.date.today()
@@ -166,7 +205,6 @@ def replay_catch_up_plan(
     run_ads: Callable[..., object] = ads_daily.run,
     run_sales: Callable[..., object] = sales_traffic.run,
 ) -> list[CatchUpReplayResult]:
-    """Replay supported catch-up plans through existing pipeline boundaries."""
     results: list[CatchUpReplayResult] = []
     for plan in plans:
         replayed = False
@@ -181,14 +219,7 @@ def replay_catch_up_plan(
                 datasets=(plan.dataset,),
             )
             replayed = True
-        results.append(
-            CatchUpReplayResult(
-                dataset=plan.dataset,
-                planned_days=plan.days,
-                replayed=replayed,
-                dry_run=dry_run,
-            )
-        )
+        results.append(CatchUpReplayResult(plan.dataset, plan.days, replayed, dry_run))
     return results
 
 
@@ -211,12 +242,20 @@ def evaluate_alerts(
             continue
         if run["status"] in {"failed", "partial"}:
             alerts.append(
-                Alert(dataset, "failed", "critical", f"{dataset} last run ended {run['status']}: {run['error'] or 'no error recorded'}")
+                Alert(
+                    dataset,
+                    "failed",
+                    "critical",
+                    f"{dataset} last run ended {run['status']}: "
+                    f"{run['error'] or 'no error recorded'}",
+                )
             )
             continue
         finished_at = run["finished_at"]
         if finished_at is None:
-            alerts.append(Alert(dataset, "running", "warning", f"{dataset} has a run still marked running"))
+            alerts.append(
+                Alert(dataset, "running", "warning", f"{dataset} has a run still marked running")
+            )
             continue
         if finished_at.tzinfo is None:
             finished_at = finished_at.replace(tzinfo=dt.timezone.utc)
@@ -255,7 +294,10 @@ def run_once(tenant_id: str, *, dry_run: bool = True, include_rules: bool = True
     else:
         run_ingestion(tenant_id, dry_run=dry_run)
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
-        return evaluate_alerts(conn, tenant_id)
+        alerts = evaluate_alerts(conn, tenant_id)
+        persist_alerts(conn, tenant_id, alerts)
+        conn.commit()
+        return alerts
 
 
 def main() -> None:
@@ -277,7 +319,9 @@ def main() -> None:
                 finished = item.finished_at.isoformat() if item.finished_at else "running"
                 error = f" error={item.error}" if item.error else ""
                 print(
-                    f"RUN_HISTORY {item.dataset} status={item.status} started={item.started_at.isoformat()} finished={finished} rows={item.rows_loaded}{error}"
+                    f"RUN_HISTORY {item.dataset} status={item.status} "
+                    f"started={item.started_at.isoformat()} finished={finished} "
+                    f"rows={item.rows_loaded}{error}"
                 )
     if args.show_catch_up or args.replay_catch_up:
         with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
@@ -287,7 +331,10 @@ def main() -> None:
         if args.replay_catch_up:
             for result in replay_catch_up_plan(args.tenant_id, plans, dry_run=not args.live):
                 status = "replayed" if result.replayed else "planned_only"
-                print(f"CATCH_UP_REPLAY {result.dataset} {status} days={result.planned_days} dry_run={result.dry_run}")
+                print(
+                    f"CATCH_UP_REPLAY {result.dataset} {status} "
+                    f"days={result.planned_days} dry_run={result.dry_run}"
+                )
     alerts = run_once(args.tenant_id, dry_run=not args.live, include_rules=not args.skip_rules)
     for alert in alerts:
         print(f"{alert.severity.upper()} {alert.dataset} {alert.kind}: {alert.message}")
