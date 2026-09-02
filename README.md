@@ -10,9 +10,10 @@ reporting in one automated system — instead of Google Sheets plus manual bid c
 
 ## Status: MVP build sprint
 
-CI is now active and has been green across the MVP implementation PRs. The repo has moved
+CI is active and has been green across the MVP implementation PRs. The repo has moved
 from “committed but never executed” to a tested first-pass system with ingestion, dashboard
-reads, scheduler, rules, action write-back seams, Ads HTTP dispatch and verification.
+reads, scheduler, rules, action write-back seams, Ads HTTP dispatch, verification, operational
+alerts and repeatable helper commands.
 
 Completed MVP PRs:
 
@@ -30,24 +31,29 @@ Completed MVP PRs:
 | #51 | Ads HTTP layer | Token refresh, catalogued dispatch, Retry-After, report polling/download |
 | #52 | Ads action client | Live Ads action client behind `--live-ads`, encrypted rotated-token persistence |
 | #53 | Verification scorecard | T+7 action verification with pre/post keyword performance impact |
+| #68-#70 | Scheduler catch-up | Rolling gap detection plus Sales & Traffic / Ads replay seams |
+| #71-#74 | Operational visibility | Run history, dashboard alert banners and persisted scheduler alerts |
+| #75-#77 | Action worker observability | Failure/auth alerts and `action_worker` run summaries |
+| #79-#83 | Operator workflow | Local gates, alert docs, PR batch flow and Makefile helper commands |
 
 ### Current state by layer
 
 | Layer | State | Evidence |
 | --- | --- | --- |
 | Compose stack (Postgres 16, Redis, Metabase) | committed | `infra/docker-compose.yml` |
-| Migrations through `0012` + matching downs for new raw tables | CI-tested | `packages/db/migrations/` |
+| Migrations through `0016` + matching downs for new raw tables | CI-tested | `packages/db/migrations/` |
 | Migration runner + ledger + checksums | CI-tested | `packages/db/migrate.py`, `tests/test_migrate.py` |
 | Multi-tenancy + RLS policies | Postgres-tested | `tests/test_rls_isolation.py` |
 | dbt project: staging + marts | build-tested; schema names match app security views | `packages/dbt/models/`, `packages/dbt/macros/generate_schema_name.sql` |
-| Ads daily ingestion | implemented with live client seam | `services/ingest/pipelines/ads_daily.py` |
-| Sales & Traffic ingestion | implemented with live client seam | `services/ingest/pipelines/sales_traffic.py` |
+| Ads daily ingestion | implemented with live client seam and catch-up replay | `services/ingest/pipelines/ads_daily.py` |
+| Sales & Traffic ingestion | implemented with live client seam and catch-up replay | `services/ingest/pipelines/sales_traffic.py` |
 | Ads API client | HTTP dispatch + token refresh implemented | `services/ingest/clients/ads_api.py` |
 | Rules engine | evaluated by runner, queues proposals only | `services/rules/` |
-| Scheduler | runs ingestion + rules, evaluates pipeline health | `services/scheduler/runner.py` |
-| Action worker | dry-run default; keyword/target bids separated; unverified live actions blocked | `services/actions/worker.py` |
+| Scheduler | runs ingestion + rules, evaluates/persists health alerts, catch-up support | `services/scheduler/runner.py` |
+| Action worker | dry-run default; keyword/target bids separated; unverified live actions blocked; alerts + run summaries | `services/actions/worker.py` |
 | Verification | T+7 scorecard for keyword-level actions | `services/actions/verification.py` |
-| Web dashboard | command center, product/SQP opportunities, economics, approvals and history | `apps/web/` |
+| Web dashboard | command center, product/SQP opportunities, economics, approvals, history and operational alerts | `apps/web/` |
+| Operator docs | local gates, alerts, PR batch flow | `docs/` |
 | Test suite | CI green across Python, DB and web checks | `.github/workflows/ci.yml`, `tests/` |
 
 ### Main local gates
@@ -65,6 +71,20 @@ pytest -q -m db
 
 cd apps/web && npm install && npm run typecheck && npm run build
 ```
+
+See also: `docs/local-gates.md`.
+
+### Useful operator commands
+
+```bash
+make scheduler                  # dry-run scheduler cycle by default
+make scheduler-history          # recent pipeline run history
+make scheduler-catch-up         # rolling catch-up gaps
+make actions                    # approved-action worker dry-run
+make actions-live               # explicit live Ads write-back
+```
+
+All commands default to `DEV_TENANT_ID`; override with `TENANT_ID=<tenant-id>`.
 
 ### Still intentionally pending
 
@@ -117,6 +137,18 @@ Three things in that chain are deliberate and easy to get wrong:
 
 ---
 
+## Operational visibility
+
+- Scheduler health checks persist `data_stale` and `pipeline_failed` alerts.
+- Action worker failures persist `action_failed` alerts.
+- Live Ads credential load failures persist `auth_expired` alerts.
+- The Command Center shows critical/warning alert banners before KPI content and even in the no-data state.
+- The History page shows open alerts and recent `pipeline_run` records, including `action_worker` summaries.
+
+See also: `docs/alert-operations.md`.
+
+---
+
 ## Repo layout
 
 ```
@@ -131,7 +163,7 @@ packages/db           migrations/ + down/, migrate.py, seed.py
 packages/dbt          staging + marts models, schema tests, sources
 packages/shared       marketplaces.py, endpoints.py
 infra                 docker-compose.yml
-docs/adr              architecture decision records
+docs                  ADRs plus local gates, alert ops and PR batch workflow
 tests                 Python unit + Postgres-backed coverage
 ```
 
@@ -171,7 +203,7 @@ Three roles, three blast radii. Nothing uses the owner connection except migrati
 - **Ads API reports go back ~95 days only** (Sponsored Display and SB v2: 60 days).
 - **Sales & Traffic max history is 2 years** and must be requested at CHILD ASIN granularity.
 - **Amazon rate limits are unforgiving**; `Retry-After` wins over local backoff.
-- **Write-back is dry-run by default**. Live Ads mutation requires `--live-ads`.
+- **Write-back is dry-run by default**. Live Ads mutation requires `--live-ads` or `make actions-live`.
 - **Secrets never enter this repo.** Refresh tokens are stored encrypted; rotated tokens are
   persisted back to the vault.
 - **No AI/ML bidding.** Rules are deterministic, inspectable and logged.
@@ -196,6 +228,8 @@ Useful commands:
 
 ```bash
 python -m services.scheduler.runner --tenant-id <tenant-id>
+python -m services.scheduler.runner --tenant-id <tenant-id> --show-history --skip-rules
+python -m services.scheduler.runner --tenant-id <tenant-id> --show-catch-up --skip-rules
 python -m services.rules.runner --tenant-id <tenant-id>
 python -m services.actions.worker --tenant-id <tenant-id>          # dry-run default
 python -m services.actions.worker --tenant-id <tenant-id> --live-ads
