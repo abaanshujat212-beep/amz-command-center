@@ -44,15 +44,15 @@ Completed MVP PRs:
 | Migrations through `0016` + matching downs for new raw tables | CI-tested | `packages/db/migrations/` |
 | Migration runner + ledger + checksums | CI-tested | `packages/db/migrate.py`, `tests/test_migrate.py` |
 | Multi-tenancy + RLS policies | Postgres-tested | `tests/test_rls_isolation.py` |
-| dbt project: staging + marts | committed; models updated for raw JSON | `packages/dbt/models/` |
+| dbt project: staging + marts | build-tested; schema names match app security views | `packages/dbt/models/`, `packages/dbt/macros/generate_schema_name.sql` |
 | Ads daily ingestion | implemented with live client seam and catch-up replay | `services/ingest/pipelines/ads_daily.py` |
 | Sales & Traffic ingestion | implemented with live client seam and catch-up replay | `services/ingest/pipelines/sales_traffic.py` |
 | Ads API client | HTTP dispatch + token refresh implemented | `services/ingest/clients/ads_api.py` |
 | Rules engine | evaluated by runner, queues proposals only | `services/rules/` |
 | Scheduler | runs ingestion + rules, evaluates/persists health alerts, catch-up support | `services/scheduler/runner.py` |
-| Action worker | dry-run default; live Ads opt-in; alerts + run summaries | `services/actions/worker.py` |
+| Action worker | dry-run default; keyword/target bids separated; unverified live actions blocked; alerts + run summaries | `services/actions/worker.py` |
 | Verification | T+7 scorecard for keyword-level actions | `services/actions/verification.py` |
-| Web dashboard | server pages, JSON read endpoints, alert/run-history visibility | `apps/web/` |
+| Web dashboard | command center, product/SQP opportunities, economics, approvals, history and operational alerts | `apps/web/` |
 | Operator docs | local gates, alerts, PR batch flow | `docs/` |
 | Test suite | CI green across Python, DB and web checks | `.github/workflows/ci.yml`, `tests/` |
 
@@ -88,12 +88,12 @@ All commands default to `DEV_TENANT_ID`; override with `TENANT_ID=<tenant-id>`.
 
 ### Still intentionally pending
 
-- Full dbt build in CI and mart reconciliation against Seller Central.
+- Mart reconciliation against Seller Central using real account data.
 - Real SP-API HTTP dispatch layer parity with the Ads client.
 - Live baseline reads for every Ads action type before write-back.
 - Campaign/placement/search-term verification scorecards beyond keyword actions.
-- Cost ledger import UI/workflow for real COGS, FBA, freight, VAT and storage.
-- Mobile app and product-hunting modules.
+- Authenticated browser upload for the cost ledger (the UI documents the validated CLI importer).
+- Mobile app.
 
 ---
 

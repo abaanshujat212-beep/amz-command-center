@@ -3,6 +3,7 @@ import { money } from "@/lib/format"
 import { pendingActions, type PendingAction } from "@/lib/queries"
 import { canApprove, currentTenantId } from "@/lib/session"
 import { approveAction, rejectAction } from "./actions"
+import { liveActionSupport } from "@/lib/action-support"
 
 export const dynamic = "force-dynamic"
 
@@ -37,6 +38,7 @@ function hoursLeft(expiresAt: string): number {
 
 function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 	const left = hoursLeft(a.expires_at)
+	const live = liveActionSupport(a.entity_type, a.action_type)
 	return (
 		<li className="rounded-lg border border-slate-200 bg-white p-4">
 			<div className="flex flex-wrap items-start justify-between gap-4">
@@ -65,6 +67,7 @@ function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 							Clamped by a guardrail: {a.clamp_note}
 						</p>
 					)}
+					<p className={`mt-1 text-xs ${live.supported ? "tone-good" : "tone-warn"}`}>{live.supported ? "Live path verified" : "Live apply blocked"} · {live.message}</p>
 
 					<div className="mt-2 text-xs text-slate-500">
 						{a.rule_name ?? a.rule_code ?? "manual"} &middot; expires in {left}h
@@ -76,7 +79,7 @@ function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 						<input type="hidden" name="id" value={a.id} />
 						<button
 							type="submit"
-							disabled={!armed}
+							disabled={!armed || !live.supported}
 							className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:bg-slate-300"
 						>
 							Approve

@@ -54,6 +54,27 @@ def test_call_uses_catalogued_url_and_json_body(monkeypatch):
     assert calls[0][2]["json"] == {"maxResults": 1}
 
 
+def test_target_bid_never_uses_keyword_endpoint(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.targets.list":
+            return {"targets": [{"targetId": "t-1", "bid": 0.75}]}
+        return {"ok": True}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    assert c.target_bid("t-1") == {"value": 0.75}
+    c.update_target_bid("t-1", 0.9, dry_run=False)
+    assert calls == [
+        ("ads.targets.list", {"maxResults": 500, "targetIdFilter": {"include": ["t-1"]}}),
+        ("ads.targets.update", {"targetingClauses": [{"targetId": "t-1", "bid": 0.9}]}),
+    ]
+    assert all("keywords" not in endpoint for endpoint, _ in calls)
+
+
 def test_call_retries_429_retry_after(monkeypatch):
     responses = [
         response(429, headers={"Retry-After": "0"}),
