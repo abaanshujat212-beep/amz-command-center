@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { query, withTenant } from "@/lib/db"
 import { canApprove, currentTenantId, currentUserId } from "@/lib/session"
+import { liveActionSupport } from "@/lib/action-support"
 
 /**
  * Approve or reject a proposed change.
@@ -50,6 +51,13 @@ async function decide(actionId: string, decision: Decision): Promise<void> {
 	const isApproval = decision === "approved"
 
 	await withTenant(tenantId, async (c) => {
+		if (isApproval) {
+			const candidate = await query<{ entity_type: string; action_type: string }>(c, "select entity_type, action_type from action where id = $1 and status = 'pending'", [actionId])
+			if (candidate.length > 0) {
+				const support = liveActionSupport(candidate[0].entity_type, candidate[0].action_type)
+				if (!support.supported) throw new NothingToDecide(support.message)
+			}
+		}
 		// $2 feeds both status and decision. That works only because the two
 		// vocabularies happen to share these two words right now (0003's status
 		// CHECK and 0009's decision CHECK). If either ever gains a value the other

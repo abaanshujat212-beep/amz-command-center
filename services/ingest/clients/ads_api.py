@@ -174,6 +174,12 @@ class AdsClient:
             body["keywordIdFilter"] = {"include": keyword_ids}
         return self._call("ads.keywords.list", body=body)
 
+    def list_targets(self, target_ids: list[str] | None = None) -> dict:
+        body: dict = {"maxResults": 500}
+        if target_ids:
+            body["targetIdFilter"] = {"include": target_ids}
+        return self._call("ads.targets.list", body=body)
+
     def keyword_bid(self, keyword_id: str) -> dict:
         result = self.list_keywords(keyword_ids=[keyword_id])
         keywords = result.get("keywords") or result.get("keywordResponse") or []
@@ -181,6 +187,14 @@ class AdsClient:
             if str(keyword.get("keywordId")) == str(keyword_id):
                 return {"value": keyword.get("bid")}
         raise RuntimeError(f"keyword {keyword_id} was not returned by Ads API")
+
+    def target_bid(self, target_id: str) -> dict:
+        result = self.list_targets(target_ids=[target_id])
+        targets = result.get("targets") or result.get("targetingClauses") or []
+        for target in targets:
+            if str(target.get("targetId") or target.get("targetingId")) == str(target_id):
+                return {"value": target.get("bid")}
+        raise RuntimeError(f"target {target_id} was not returned by Ads API")
 
     def placement_modifier(self, campaign_id: str, placement_api_enum: str) -> dict:
         result = self.list_campaigns(campaign_ids=[campaign_id])
@@ -251,6 +265,12 @@ class AdsClient:
             return {"status": "WOULD_DO", "entity_id": entity_id, "bid": new_bid}
         body = {"keywords": [{"keywordId": entity_id, "bid": new_bid}]}
         return self._call_mutating("ads.keywords.update", body=body)
+
+    def update_target_bid(self, target_id: str, new_bid: float, dry_run: bool = True) -> dict:
+        if dry_run:
+            return {"status": "WOULD_DO", "entity_id": target_id, "bid": new_bid}
+        body = {"targetingClauses": [{"targetId": target_id, "bid": new_bid}]}
+        return self._call_mutating("ads.targets.update", body=body)
 
     def update_placement_modifier(self, campaign_id: str, placement_api_enum: str, new_percentage: float, current_percentage: float | None, dry_run: bool = True) -> dict:
         if placement_api_enum not in PLACEMENT_BID_ENUMS:
