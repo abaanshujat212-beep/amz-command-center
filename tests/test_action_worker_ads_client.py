@@ -15,12 +15,20 @@ class FakeAds:
         self.calls.append(("read_bid", keyword_id))
         return {"value": 1.0}
 
+    def target_bid(self, target_id):
+        self.calls.append(("read_target_bid", target_id))
+        return {"value": 0.8}
+
     def placement_modifier(self, campaign_id, placement):
         self.calls.append(("read_placement", campaign_id, placement))
         return {"value": 15.0, "placement": placement}
 
     def update_bid(self, entity_id, new_bid, dry_run=True):
         self.calls.append(("bid", entity_id, new_bid, dry_run))
+        return {"ok": True}
+
+    def update_target_bid(self, entity_id, new_bid, dry_run=True):
+        self.calls.append(("target_bid", entity_id, new_bid, dry_run))
         return {"ok": True}
 
     def update_placement_modifier(self, campaign_id, placement, new_percentage, current_percentage, dry_run=True):
@@ -70,6 +78,29 @@ def test_ads_action_client_applies_keyword_bid():
     result = AdsActionClient(ads).apply(action())
     assert result == {"ok": True}
     assert ads.calls == [("bid", "k1", 1.25, False)]
+
+
+def test_target_bid_uses_target_read_and_update_endpoints():
+    ads = FakeAds()
+    target = action(entity_type="target")
+    assert AdsActionClient(ads).read_before_value(target) == {"value": 0.8}
+    AdsActionClient(ads).apply(target)
+    assert ads.calls == [
+        ("read_target_bid", "k1"),
+        ("target_bid", "k1", 1.25, False),
+    ]
+
+
+def test_unsupported_live_action_fails_before_any_ads_call():
+    ads = FakeAds()
+    unsupported = action(action_type="set_budget", entity_type="campaign")
+    try:
+        AdsActionClient(ads).read_before_value(unsupported)
+    except NotImplementedError as exc:
+        assert "intentionally blocked" in str(exc)
+    else:
+        raise AssertionError("unsupported action should be blocked")
+    assert ads.calls == []
 
 
 def test_ads_action_client_applies_placement_modifier():

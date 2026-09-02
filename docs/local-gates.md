@@ -14,6 +14,7 @@ pytest -q -m "not db"
 ```bash
 make up
 python -m packages.db.migrate up
+python -m packages.db.migrate up  # idempotency gate
 python -m packages.db.migrate status
 python -m packages.db.seed
 pytest -q -m db

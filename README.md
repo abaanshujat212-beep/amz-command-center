@@ -39,15 +39,15 @@ Completed MVP PRs:
 | Migrations through `0012` + matching downs for new raw tables | CI-tested | `packages/db/migrations/` |
 | Migration runner + ledger + checksums | CI-tested | `packages/db/migrate.py`, `tests/test_migrate.py` |
 | Multi-tenancy + RLS policies | Postgres-tested | `tests/test_rls_isolation.py` |
-| dbt project: staging + marts | committed; models updated for raw JSON | `packages/dbt/models/` |
+| dbt project: staging + marts | build-tested; schema names match app security views | `packages/dbt/models/`, `packages/dbt/macros/generate_schema_name.sql` |
 | Ads daily ingestion | implemented with live client seam | `services/ingest/pipelines/ads_daily.py` |
 | Sales & Traffic ingestion | implemented with live client seam | `services/ingest/pipelines/sales_traffic.py` |
 | Ads API client | HTTP dispatch + token refresh implemented | `services/ingest/clients/ads_api.py` |
 | Rules engine | evaluated by runner, queues proposals only | `services/rules/` |
 | Scheduler | runs ingestion + rules, evaluates pipeline health | `services/scheduler/runner.py` |
-| Action worker | dry-run default; live Ads opt-in via `--live-ads` | `services/actions/worker.py` |
+| Action worker | dry-run default; keyword/target bids separated; unverified live actions blocked | `services/actions/worker.py` |
 | Verification | T+7 scorecard for keyword-level actions | `services/actions/verification.py` |
-| Web dashboard | server pages + JSON read endpoints | `apps/web/` |
+| Web dashboard | command center, product/SQP opportunities, economics, approvals and history | `apps/web/` |
 | Test suite | CI green across Python, DB and web checks | `.github/workflows/ci.yml`, `tests/` |
 
 ### Main local gates
@@ -68,12 +68,12 @@ cd apps/web && npm install && npm run typecheck && npm run build
 
 ### Still intentionally pending
 
-- Full dbt build in CI and mart reconciliation against Seller Central.
+- Mart reconciliation against Seller Central using real account data.
 - Real SP-API HTTP dispatch layer parity with the Ads client.
 - Live baseline reads for every Ads action type before write-back.
 - Campaign/placement/search-term verification scorecards beyond keyword actions.
-- Cost ledger import UI/workflow for real COGS, FBA, freight, VAT and storage.
-- Mobile app and product-hunting modules.
+- Authenticated browser upload for the cost ledger (the UI documents the validated CLI importer).
+- Mobile app.
 
 ---
 

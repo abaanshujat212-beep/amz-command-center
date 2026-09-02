@@ -79,6 +79,9 @@ export default function RootLayout({
 							<Link href="/search-terms" className="hover:underline">
 								Search terms
 							</Link>
+							<Link href="/opportunities" className="hover:underline">Products</Link>
+							<Link href="/sqp" className="hover:underline">SQP</Link>
+							<Link href="/economics" className="hover:underline">Economics</Link>
 							<Link href="/approvals" className="hover:underline">
 								Approvals
 							</Link>

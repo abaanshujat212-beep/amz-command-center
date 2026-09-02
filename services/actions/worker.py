@@ -53,17 +53,24 @@ class AdsActionClient:
         self.ads = ads
 
     def read_before_value(self, action: sm.Action) -> dict | None:
-        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+        if action.action_type == "set_bid" and action.entity_type == "keyword":
             return self.ads.keyword_bid(action.entity_id)
+        if action.action_type == "set_bid" and action.entity_type == "target":
+            return self.ads.target_bid(action.entity_id)
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
-        return action.before_value
+        raise NotImplementedError(
+            f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}. "
+            "No verified live read/apply/rollback implementation exists."
+        )
 
     def apply(self, action: sm.Action) -> dict:
         value = action.after_value.get("value")
-        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+        if action.action_type == "set_bid" and action.entity_type == "keyword":
             return self.ads.update_bid(action.entity_id, float(value), dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "target":
+            return self.ads.update_target_bid(action.entity_id, float(value), dry_run=False)
         if action.action_type == "set_placement_modifier":
             return self.ads.update_placement_modifier(
                 action.entity_id,
@@ -72,14 +79,16 @@ class AdsActionClient:
                 float(action.before_value["value"]) if action.before_value else None,
                 dry_run=False,
             )
-        raise NotImplementedError(f"Ads action not wired yet: {action.entity_type}/{action.action_type}")
+        raise NotImplementedError(f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}")
 
     def rollback(self, action: sm.Action) -> dict:
         if action.before_value is None:
             raise RuntimeError("cannot rollback without before_value")
         original = action.before_value.get("value")
-        if action.action_type == "set_bid" and action.entity_type in {"keyword", "target"}:
+        if action.action_type == "set_bid" and action.entity_type == "keyword":
             return self.ads.update_bid(action.entity_id, float(original), dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "target":
+            return self.ads.update_target_bid(action.entity_id, float(original), dry_run=False)
         raise NotImplementedError(f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}")
 
 
@@ -266,11 +275,17 @@ def persist_auth_failure_alert(conn, tenant_id: str, error: str) -> bool:
 
 
 def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -> tuple[sm.Action, dict | None]:
-    live_before = client.read_before_value(action)
     try:
+        live_before = client.read_before_value(action)
         response = client.apply(action)
     except Exception as exc:
-        return sm.apply(action, now=now, live_before_value=live_before, api_ok=False, error=str(exc)), None
+        return sm.apply(
+            action,
+            now=now,
+            live_before_value=action.before_value,
+            api_ok=False,
+            error=str(exc),
+        ), None
     return sm.apply(action, now=now, live_before_value=live_before, api_ok=True), response
 
 
