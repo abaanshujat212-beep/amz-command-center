@@ -16,6 +16,10 @@ missing piece. Run:
     cd packages/dbt && dbt build
     psql -c "create user axaty_copilot_app with password 'devonly';"
     psql -c "grant axaty_copilot to axaty_copilot_app;"
+    psql -c "alter role axaty_copilot_app set default_transaction_read_only = on;"
+    psql -c "alter role axaty_copilot_app set statement_timeout = '15s';"
+    psql -c "alter role axaty_copilot_app set idle_in_transaction_session_timeout = '30s';"
+    psql -c "alter role axaty_copilot_app set lock_timeout = '2s';"
     export DATABASE_URL_COPILOT=postgresql://axaty_copilot_app:devonly@localhost:5432/axaty
     pytest tests/test_copilot_isolation.py -v
 """
@@ -35,8 +39,8 @@ OWNER_URL = os.environ.get("DATABASE_URL")
 
 requires_copilot = pytest.mark.skipif(
     not COPILOT_URL,
-    reason="DATABASE_URL_COPILOT is not set; create axaty_copilot_app and grant it "
-    "the axaty_copilot role (see 0007_copilot_role.sql)",
+    reason="DATABASE_URL_COPILOT is not set; provision axaty_copilot_app with the "
+    "read-only role settings documented in .env.example",
 )
 requires_owner = pytest.mark.skipif(
     not OWNER_URL, reason="DATABASE_URL is not set; needed to look up two tenant ids"
