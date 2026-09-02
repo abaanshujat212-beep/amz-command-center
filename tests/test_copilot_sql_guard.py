@@ -245,6 +245,21 @@ def test_the_role_cannot_log_in_by_itself():
     assert re.search(r"create\s+role\s+axaty_copilot\s+nologin", migration_sql(), re.I)
 
 
+def test_copilot_login_provisioning_copies_server_safety_defaults():
+    instructions = (ROOT / ".env.example").read_text(encoding="utf-8")
+    for setting, value in (
+        ("default_transaction_read_only", "on"),
+        ("statement_timeout", "'15s'"),
+        ("idle_in_transaction_session_timeout", "'30s'"),
+        ("lock_timeout", "'2s'"),
+    ):
+        assert re.search(
+            rf"alter\s+role\s+axaty_copilot_app\s+set\s+{setting}\s*=\s*{value}",
+            instructions,
+            re.I,
+        )
+
+
 def test_no_password_is_committed():
     # The example CREATE USER lives in a comment on purpose. If it ever moves
     # into executable SQL, the password is in git forever.

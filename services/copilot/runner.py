@@ -118,8 +118,8 @@ def boot_check(conn) -> dict[str, str]:
     if read_only != "on":
         raise PrivilegeMismatch(
             f"session for '{user}' is not read-only (transaction_read_only={read_only}). "
-            "Migration 0007 sets this on the axaty_copilot role; a session without it "
-            "is not that role."
+            "PostgreSQL does not inherit ALTER ROLE defaults from the NOLOGIN group role. "
+            "Provision the LOGIN role with the read-only settings in .env.example."
         )
     return {"user": user, "read_only": read_only}
 
