@@ -34,3 +34,12 @@ def test_approval_ui_blocks_unverified_live_action_types():
     assert "LIVE_SUPPORTED" in support
     assert "liveActionSupport" in actions
     assert "!live.supported" in page
+
+
+def test_header_reads_tenant_and_ads_profile_through_rls_context():
+    layout = (ROOT / "apps/web/app/layout.tsx").read_text(encoding="utf-8")
+    queries = (ROOT / "apps/web/lib/queries.ts").read_text(encoding="utf-8")
+    assert "tenantIdentity(c)" in layout
+    assert "Amazon profile pending" in layout
+    assert "current_setting('app.tenant_id'" in queries
+    assert "left join ads_profile" in queries

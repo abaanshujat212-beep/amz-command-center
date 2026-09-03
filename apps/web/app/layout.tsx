@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import "./globals.css"
 import { withTenant } from "@/lib/db"
-import { automationState, dataFreshness } from "@/lib/queries"
+import { automationState, dataFreshness, tenantIdentity } from "@/lib/queries"
 import { currentTenantId } from "@/lib/session"
 
 export const metadata: Metadata = {
@@ -17,13 +17,17 @@ async function StatusBar() {
 	let armed = false
 	let dryRun = true
 	let stalest: { dataset: string; hours: number } | null = null
+	let tenant: Awaited<ReturnType<typeof tenantIdentity>> = null
 
 	try {
 		const tenantId = currentTenantId()
-		const { settings, freshness } = await withTenant(tenantId, async (c) => ({
+		const result = await withTenant(tenantId, async (c) => ({
 			settings: await automationState(c),
 			freshness: await dataFreshness(c),
+			tenant: await tenantIdentity(c),
 		}))
+		const { settings, freshness } = result
+		tenant = result.tenant
 		armed = settings?.automation_enabled ?? false
 		dryRun = settings?.dry_run ?? true
 		for (const f of freshness) {
@@ -43,6 +47,16 @@ async function StatusBar() {
 
 	return (
 		<div className="flex items-center gap-4 text-xs">
+			{tenant && (
+				<div className="hidden text-right sm:block">
+					<div className="font-medium text-slate-800">{tenant.name}</div>
+					<div className="text-slate-500">
+						{tenant.profile_id
+							? `${tenant.country_code ?? "Amazon"} profile ${tenant.profile_id}`
+							: "Amazon profile pending"}
+					</div>
+				</div>
+			)}
 			<span
 				className={
 					armed && !dryRun
