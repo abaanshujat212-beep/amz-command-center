@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -47,12 +48,14 @@ class SpApiClient:
         tenant_id: str | None = None,
         region: str = ep.DEFAULT_REGION,
         timeout_s: float = 60.0,
+        base_url: str | None = None,
     ) -> None:
         self.credentials = credentials
         self.marketplace = marketplace
         self.tenant_id = tenant_id
         self.region = region
         self.timeout_s = timeout_s
+        self.base_url = (base_url or os.environ.get("SPAPI_ENDPOINT") or "").rstrip("/") or None
         self._access_token: str | None = None
         self._access_expires_at: dt.datetime | None = None
 
@@ -99,6 +102,15 @@ class SpApiClient:
         }
 
     def url(self, endpoint_key: str, **path_params: str) -> str:
+        if self.base_url:
+            endpoint = ep.endpoint(endpoint_key)
+            path = endpoint.path
+            for name, value in path_params.items():
+                path = path.replace("{" + name + "}", str(value))
+            if "{" in path:
+                missing = path[path.index("{") :].split("}")[0].strip("{")
+                raise ValueError(f"{endpoint_key} needs path parameter '{missing}'")
+            return self.base_url + path
         return ep.url_for(endpoint_key, region=self.region, **path_params)
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:
