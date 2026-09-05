@@ -1,0 +1,4 @@
+import { query, withTenant } from "@/lib/db"
+import { currentContext } from "@/lib/session"
+import { SettingsCard, SettingsHeading, StatusPill } from "@/components/settings-ui"
+export default async function BillingSettingsPage(){const actor=await currentContext();const row=(await withTenant(actor.tenantId,c=>query<{plan:string}>(c,"select plan from tenant where id=$1",[actor.tenantId])))[0];return <div><SettingsHeading title="Billing" description="Subscription and usage billing for this company."/><SettingsCard title="Current plan" aside={<StatusPill ready={false}>Billing not enabled</StatusPill>}><div className="text-2xl font-semibold capitalize">{row.plan}</div><p className="mt-2 text-sm text-slate-500">No payment method is stored. Billing checkout and invoices will appear here when a payment provider is connected.</p></SettingsCard></div>}

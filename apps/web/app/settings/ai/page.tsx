@@ -1,0 +1,15 @@
+import { SettingsCard, SettingsHeading, StatusPill } from "@/components/settings-ui"
+
+const providers = [
+	["OpenRouter", "OPENROUTER_API_KEY", "google/gemini-2.0-flash-001", "One key for multiple model vendors"],
+	["OpenAI", "OPENAI_API_KEY", "gpt-4o-mini", "OpenAI chat and reasoning models"],
+	["Google Gemini", "GEMINI_API_KEY", "gemini-2.0-flash", "Google Gemini models"],
+	["Anthropic", "ANTHROPIC_API_KEY", "claude-3-5-sonnet-latest", "Claude models"],
+	["Ollama", "OLLAMA_BASE_URL", "llama3.1:8b", "Local model; account data stays on your host"],
+] as const
+
+export default function AiSettingsPage() {
+	const selected = process.env.LLM_PROVIDER || "openrouter"
+	const model = process.env.LLM_MODEL || "Provider default"
+	return <div><SettingsHeading title="AI model connections" description="Bring your own provider. Keys remain server-side and are never returned to the browser."/><div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{providers.map(([name,key,defaultModel,note]) => { const slug = name === "Google Gemini" ? "gemini" : name.toLowerCase().split(" ")[0]; const local = name === "Ollama"; const ready = local ? Boolean(process.env.OLLAMA_BASE_URL) : Boolean(process.env[key]); return <SettingsCard key={name} title={name} aside={<StatusPill ready={ready}>{ready ? "Configured" : "Not configured"}</StatusPill>}><p className="text-sm text-slate-600">{note}</p><dl className="mt-4 space-y-2 text-xs"><div className="flex justify-between gap-4"><dt className="text-slate-400">Default model</dt><dd className="text-right font-mono">{defaultModel}</dd></div><div className="flex justify-between gap-4"><dt className="text-slate-400">Server setting</dt><dd className="font-mono">{key}</dd></div></dl>{selected === slug ? <div className="mt-4 rounded-lg bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700">Primary provider</div> : null}</SettingsCard>})}</div><SettingsCard title="Copilot defaults" aside={<StatusPill ready={Number(process.env.LLM_MONTHLY_BUDGET || 0) > 0}>{Number(process.env.LLM_MONTHLY_BUDGET || 0) > 0 ? "Calls enabled" : "Calls off"}</StatusPill>}><div className="grid gap-4 text-sm sm:grid-cols-3"><div><div className="text-slate-400">Primary provider</div><div className="mt-1 font-medium capitalize">{selected}</div></div><div><div className="text-slate-400">Selected model</div><div className="mt-1 font-mono text-xs">{model}</div></div><div><div className="text-slate-400">Monthly limit</div><div className="mt-1 font-medium">${process.env.LLM_MONTHLY_BUDGET || "0"} USD</div></div></div><div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><b>Amazon Ads default:</b> disabled. Future AI recommendations remain read-only until the Copilot UI is enabled; every Amazon mutation will still require the approval queue and action guardrails.</div><p className="mt-4 text-xs text-slate-500">Configure provider values in the deployment environment, then restart the service. Secrets are intentionally never displayed here.</p></SettingsCard></div>
+}

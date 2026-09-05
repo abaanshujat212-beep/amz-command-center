@@ -43,3 +43,13 @@ def test_header_reads_tenant_and_ads_profile_through_rls_context():
     assert "Amazon profile pending" in layout
     assert "current_setting('app.tenant_id'" in queries
     assert "left join ads_profile" in queries
+
+
+def test_saas_settings_surface_supported_integrations_without_browser_secrets():
+    nav = (ROOT / "apps/web/components/settings-nav.tsx").read_text(encoding="utf-8")
+    ai = (ROOT / "apps/web/app/settings/ai/page.tsx").read_text(encoding="utf-8")
+    for route in ("profile", "client", "members", "ai", "amazon", "email", "billing", "api-keys", "audit"):
+        assert f'"/settings/{route}"' in nav
+    for provider in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL"):
+        assert provider in ai
+    assert "Secrets are intentionally never displayed here" in ai
