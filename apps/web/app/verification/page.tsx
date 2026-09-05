@@ -1,0 +1,21 @@
+import { isMoneyAction, shown } from "@/lib/action-value"
+import { withTenant } from "@/lib/db"
+import { money, percent, stamp } from "@/lib/format"
+import { verificationScorecards } from "@/lib/queries-verification"
+import { currentTenantId } from "@/lib/session"
+
+export const dynamic = "force-dynamic"
+
+type WindowMetrics = { cost?: number; sales?: number; clicks?: number; orders?: number; acos?: number | null; cvr?: number | null }
+type Impact = { before?: WindowMetrics; after?: WindowMetrics; entity_type?: string }
+
+function Value({ raw, type }: { raw: unknown; type: string }) { const text = shown(raw); if (text === null) return <span className="text-slate-400">unknown</span>; const n = Number(text); if (isMoneyAction(type) && Number.isFinite(n)) return <>{money(n)}</>; return <>{text}</> }
+function metricNumber(value: unknown): number | null { const n = Number(value); return Number.isFinite(n) ? n : null }
+function impact(raw: unknown): Impact { return raw && typeof raw === "object" ? raw as Impact : {} }
+function outcomeTone(outcome: string | null, status: string): string { if (outcome === "improved") return "tone-good"; if (outcome === "worsened") return "tone-bad"; if (outcome === "neutral") return "tone-warn"; if (status === "applied") return "tone-unknown"; return "tone-warn" }
+function MetricBlock({ title, metrics }: { title: string; metrics?: WindowMetrics }) { return <div className="rounded border border-slate-100 bg-slate-50 p-2 text-xs"><div className="mb-1 font-medium text-slate-700">{title}</div><div className="grid grid-cols-2 gap-x-3 gap-y-1"><span>Spend</span><span className="num">{money(metricNumber(metrics?.cost))}</span><span>Sales</span><span className="num">{money(metricNumber(metrics?.sales))}</span><span>Clicks</span><span className="num">{metricNumber(metrics?.clicks) ?? "—"}</span><span>Orders</span><span className="num">{metricNumber(metrics?.orders) ?? "—"}</span><span>ACOS</span><span className="num">{percent(metricNumber(metrics?.acos))}</span><span>CVR</span><span className="num">{percent(metricNumber(metrics?.cvr))}</span></div></div> }
+
+export default async function VerificationPage() {
+	const rows = await withTenant(await currentTenantId(), c => verificationScorecards(c))
+	return <div className="space-y-4"><div><h1 className="text-lg font-semibold">Verification scorecards</h1><p className="text-sm text-slate-600">T+7 outcome evidence for approved actions. Backend verifies mature applied actions by comparing the seven days before and after apply time.</p></div>{rows.length === 0 ? <div className="rounded-lg border bg-white p-8 text-sm text-slate-600">No applied or verified actions yet. Once an approved action is applied and matures for seven days, the verification job will write impact metrics here.</div> : <div className="space-y-3">{rows.map(row => { const i = impact(row.impact_jsonb); return <article key={row.id} className="rounded-lg border border-slate-200 bg-white p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="font-medium">{row.action_type}<span className="ml-2 text-sm font-normal text-slate-500">{row.entity_type} {row.entity_id}</span></div><div className="mt-1 text-sm tabular-nums"><Value raw={row.before_value} type={row.action_type}/><span className="mx-2 text-slate-400">→</span><span className="font-medium"><Value raw={row.after_value} type={row.action_type}/></span></div><div className="mt-1 text-xs text-slate-500">{row.rule_name ?? row.rule_code ?? "manual"}{row.reason_text ? ` · ${row.reason_text}` : ""}</div></div><div className={`rounded-full bg-slate-100 px-3 py-1 text-xs font-medium ${outcomeTone(row.outcome, row.status)}`}>{row.status === "applied" ? "awaiting T+7" : row.outcome ?? "inconclusive"}</div></div><div className="mt-4 grid gap-3 md:grid-cols-2"><MetricBlock title="Before apply" metrics={i.before}/><MetricBlock title="After apply" metrics={i.after}/></div><div className="mt-3 text-xs text-slate-500">Applied {stamp(row.applied_at)} · Verified {stamp(row.verified_at)}</div></article>})}</div>}<p className="text-xs text-slate-500">Verification is read-only. It never changes Amazon state; it only records whether an approved change improved, worsened, stayed neutral or remained inconclusive.</p></div>
+}
