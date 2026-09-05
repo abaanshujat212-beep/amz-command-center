@@ -92,7 +92,10 @@ class _Compiler:
                 raise RuleValidationError(f"'{op}' takes exactly 2 operands")
             left = self.compile(args[0], depth + 1)
             right = self.compile(args[1], depth + 1)
-            return f"({left} is not null and {right} is not null and {left} {COMPARISONS[op]} {right})"
+            # SQL comparisons already yield NULL when either side is NULL.
+            # Coalesce that to false while referencing each bound parameter only
+            # once; repeating `%s` text without repeating params breaks psycopg.
+            return f"coalesce(({left} {COMPARISONS[op]} {right}), false)"
         if op == "/":
             parts = [self.compile(a, depth + 1) for a in args]
             return f"({parts[0]} / nullif({parts[1]}, 0))"
