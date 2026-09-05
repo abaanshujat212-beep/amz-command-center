@@ -53,3 +53,11 @@ def test_saas_settings_surface_supported_integrations_without_browser_secrets():
     for provider in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OLLAMA_BASE_URL"):
         assert provider in ai
     assert "Secrets are intentionally never displayed here" in ai
+
+
+def test_settings_open_as_dedicated_workspace_and_team_is_not_duplicated():
+    shell = (ROOT / "apps/web/components/app-shell.tsx").read_text(encoding="utf-8")
+    sidebar = (ROOT / "apps/web/components/sidebar-nav.tsx").read_text(encoding="utf-8")
+    assert 'pathname.startsWith("/settings/")' in shell
+    assert "fixed inset-0 z-50" in shell
+    assert 'href="/settings/members" label="Team"' not in sidebar
