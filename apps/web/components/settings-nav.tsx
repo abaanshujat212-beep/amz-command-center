@@ -6,8 +6,8 @@ import { usePathname } from "next/navigation"
 const sections = [
 	["/settings/profile", "My profile"], ["/settings/client", "Company profile"],
 	["/settings/members", "Team & roles"], ["/settings/ai", "AI models"],
-	["/settings/amazon", "Amazon integrations"], ["/settings/email", "Email services"],
-	["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
+	["/settings/amazon", "Amazon integrations"], ["/settings/coverage", "Feature coverage"],
+	["/settings/email", "Email services"], ["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
 	["/settings/api-keys", "API keys"], ["/settings/audit", "Audit logs"],
 ] as const
 

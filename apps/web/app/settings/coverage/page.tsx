@@ -1,0 +1,26 @@
+import Link from "next/link"
+import { SettingsCard, SettingsHeading, StatusPill } from "@/components/settings-ui"
+
+const rows = [
+	{ area: "SP-API Sales & Traffic", backend: "Implemented: client, raw load, parser, sandbox seed/setup, pipeline runs", frontend: "Visible in Amazon settings, Command Center product analytics, history/run evidence", href: "/settings/amazon", status: "covered" },
+	{ area: "Ads ingestion", backend: "Implemented: report orchestration, raw landing tables, HTTP client seam", frontend: "Campaign dashboard and search terms read marts; Ads connection stays pending until API approval", href: "/settings/amazon", status: "partial" },
+	{ area: "Scheduler + catch-up", backend: "Implemented: scheduler runner, catch-up plan/replay, Makefile helpers", frontend: "Recent runs on Command Center and full run history page", href: "/history", status: "covered" },
+	{ area: "Operational alerts", backend: "Implemented: stale data, pipeline failed, auth expired, action failed", frontend: "Dashboard banners plus History open-alert list", href: "/history", status: "covered" },
+	{ area: "Rules + recommendations", backend: "Implemented: SQL rules, guardrails, diagnostic flag actions", frontend: "Findings on Command Center and approval queue for actions", href: "/approvals", status: "covered" },
+	{ area: "Action worker", backend: "Implemented: approved action worker, drift protection, dry-run/live split, run summary", frontend: "Approvals and decision history visible; live worker is still command-driven", href: "/approvals", status: "partial" },
+	{ area: "Verification", backend: "Implemented: T+7 keyword scorecard", frontend: "Decision history shows outcomes; expanded verification scorecards still pending", href: "/history", status: "partial" },
+	{ area: "Cost ledger", backend: "Implemented: validated CLI importer and economics marts", frontend: "Economics page shows readiness and import command; browser upload pending", href: "/economics", status: "partial" },
+	{ area: "Keepa/product hunting", backend: "Implemented: Keepa snapshot seam and product opportunity mart", frontend: "Product opportunities page available after data load", href: "/opportunities", status: "covered" },
+	{ area: "SQP opportunity finder", backend: "Implemented: SQP snapshot seam and opportunity mart", frontend: "SQP opportunities page available after data load", href: "/sqp", status: "covered" },
+	{ area: "LLM gateway", backend: "Implemented: provider config, spend ledger, budget constraints", frontend: "AI settings page exists; spend/usage chart still pending", href: "/settings/ai", status: "partial" },
+	{ area: "Tenant auth/RBAC", backend: "Implemented: auth schema and tenant roles", frontend: "Login, team roles and company settings exist", href: "/settings/members", status: "covered" },
+] as const
+
+function tone(status: string): { ready: boolean; label: string; cls: string } {
+	if (status === "covered") return { ready: true, label: "Frontend covered", cls: "tone-good" }
+	return { ready: false, label: "Needs follow-up", cls: "tone-warn" }
+}
+
+export default function CoveragePage() {
+	return <div className="space-y-6"><SettingsHeading title="Backend → frontend coverage" description="A working map of backend features and where operators can see or use them in the app."/><SettingsCard title="Coverage matrix"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500"><th className="p-3">Feature</th><th className="p-3">Backend status</th><th className="p-3">Frontend surface</th><th className="p-3">Status</th></tr></thead><tbody>{rows.map(row => { const t = tone(row.status); return <tr key={row.area} className="border-b align-top last:border-0"><td className="p-3 font-medium">{row.area}</td><td className="p-3 text-slate-600">{row.backend}</td><td className="p-3 text-slate-600">{row.frontend}<div><Link href={row.href} className="text-xs text-blue-700 hover:underline">Open surface →</Link></div></td><td className={`p-3 ${t.cls}`}><StatusPill ready={t.ready}>{t.label}</StatusPill></td></tr> })}</tbody></table></div></SettingsCard><SettingsCard title="Frontend follow-up backlog"><ul className="list-disc space-y-2 pl-5 text-sm text-slate-600"><li>Add browser upload for cost ledger CSV after authenticated row-level validation is ready.</li><li>Add richer verification scorecard pages for campaign, placement and search-term outcomes.</li><li>Add LLM usage/spend chart from the existing <code>llm_call</code> ledger.</li><li>Add Ads approval/testing state after Amazon grants Ads API access.</li></ul></SettingsCard></div>
+}
