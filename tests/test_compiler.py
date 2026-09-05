@@ -90,7 +90,7 @@ def test_empty_condition_rejected():
 def test_comparison_guards_against_nulls():
     """A keyword with no clicks has null ACOS. Null must never match."""
     sql, _ = compile_condition({"<": [{"var": "acos"}, 0.35]})
-    assert "is not null" in sql
+    assert "coalesce" in sql and "false" in sql
 
 
 def test_division_guards_against_zero():

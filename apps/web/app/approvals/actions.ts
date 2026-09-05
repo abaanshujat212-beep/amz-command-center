@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { query, withTenant } from "@/lib/db"
-import { canApprove, currentTenantId, currentUserId } from "@/lib/session"
+import { currentContext } from "@/lib/session"
 import { liveActionSupport } from "@/lib/action-support"
 
 /**
@@ -37,17 +37,16 @@ class NothingToDecide extends Error {}
 type Decision = "approved" | "rejected"
 
 async function decide(actionId: string, decision: Decision): Promise<void> {
-	const userId = currentUserId()
-	if (!canApprove() || userId === null) {
+	const { userId, tenantId, role } = await currentContext()
+	if (role !== "owner" && role !== "admin") {
 		// Applying a change spends real money on a real Amazon account. Without an
 		// identity there is nothing to write into the audit trail, and an audit
 		// trail with an anonymous actor is not an audit trail.
 		throw new NotAuthorised(
-			"No operator identity. Set DEV_OPERATOR_USER_ID, or wait for auth.",
+			"Only tenant owners and admins can approve Amazon actions.",
 		)
 	}
 
-	const tenantId = currentTenantId()
 	const isApproval = decision === "approved"
 
 	await withTenant(tenantId, async (c) => {

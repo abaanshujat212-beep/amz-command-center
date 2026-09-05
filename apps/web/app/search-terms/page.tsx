@@ -78,7 +78,7 @@ export default async function SearchTerms({
 	const sp = await searchParams
 	const days = parseDays(sp.days)
 	const campaign = sp.campaign?.trim() ? sp.campaign.trim() : null
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 
 	const terms = await withTenant(tenantId, (c) =>
 		searchTermPerformance(c, days, campaign, 200),

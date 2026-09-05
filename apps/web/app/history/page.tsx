@@ -41,7 +41,7 @@ function Outcome({ row }: { row: HistoryRow }) {
 export default async function History({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
 	const sp = await searchParams
 	const days = parseDays(sp.days)
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 	const { rows, totals, alerts, runs } = await withTenant(tenantId, async (c) => ({
 		rows: await actionHistory(c, days, 200),
 		totals: await historyTotals(c, days),

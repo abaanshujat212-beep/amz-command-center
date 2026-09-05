@@ -59,6 +59,7 @@ create table if not exists marts.mart_ppc_keyword_daily (
     break_even_acos numeric,
     contribution_margin_pct numeric,
     account_cvr     numeric,
+    account_ctr     numeric,
     is_settled      boolean not null
 );
 """
@@ -103,9 +104,9 @@ def _keyword_day(cur, tenant_id, through, *, keyword_id, day, acos, bid=1.00,
         " campaign_id, ad_group_id, keyword_id, keyword_text, match_type, bid,"
         " impressions, clicks, cost, attributed_orders_7d, attributed_sales_7d,"
         " attributed_units_7d, top_of_search_impression_share, break_even_acos,"
-        " contribution_margin_pct, account_cvr, is_settled)"
+        " contribution_margin_pct, account_cvr, account_ctr, is_settled)"
         " values (%s,%s,'C1','G1',%s,'hook tape','exact',%s,%s,%s,%s,%s,%s,%s,"
-        "%s,%s,0.42,0.09,true)",
+        "%s,%s,0.42,0.09,0.02,true)",
         (
             tenant_id,
             through - dt.timedelta(days=day),
@@ -144,7 +145,8 @@ def tenant(conn):
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tid,))
         cur.execute(
-            "insert into tenant (id, name) values (%s, 'test tenant')", (tid,)
+            "insert into tenant (id, name, slug) values (%s, 'test tenant', %s)",
+            (tid, f"test-{tid}"),
         )
         cur.execute(
             "insert into tenant_settings (tenant_id, automation_enabled, dry_run)"

@@ -102,9 +102,9 @@ function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 }
 
 export default async function Approvals() {
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 	const actions = await withTenant(tenantId, (c) => pendingActions(c, 100))
-	const armed = canApprove()
+	const armed = await canApprove()
 
 	return (
 		<div className="space-y-4">
@@ -115,9 +115,8 @@ export default async function Approvals() {
 
 			{!armed && (
 				<div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm">
-					Read-only: no operator identity is configured, so an approval could not
-					be attributed to anyone. Set <code>DEV_OPERATOR_USER_ID</code> until
-					auth is wired.
+					Read-only: your tenant role cannot approve Amazon changes. Ask the owner
+					to assign the Admin role if approval access is required.
 				</div>
 			)}
 

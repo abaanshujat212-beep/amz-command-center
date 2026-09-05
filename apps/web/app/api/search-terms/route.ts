@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 	const url = new URL(request.url)
 	const days = parseDays(url.searchParams.get("days") ?? undefined)
 	const campaignId = url.searchParams.get("campaignId")
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 	const data = await withTenant(tenantId, async (client) => ({
 		days,
 		searchTerms: await searchTermPerformance(client, days, campaignId),

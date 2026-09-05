@@ -113,7 +113,7 @@ export default async function CampaignDetail({
 	const { campaignId } = await params
 	const sp = await searchParams
 	const days = parseDays(sp.days)
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 
 	const { header, keywords } = await withTenant(tenantId, async (c) => ({
 		header: await campaignHeader(c, campaignId, days),

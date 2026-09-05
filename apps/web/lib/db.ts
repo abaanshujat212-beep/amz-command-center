@@ -123,7 +123,7 @@ export async function query<T extends QueryResultRow>(
 export async function assertMembership(
 	tenantId: string,
 	userId: string,
-): Promise<"owner" | "admin" | "analyst" | "viewer"> {
+): Promise<TenantRole> {
 	return withTenant(tenantId, async (client) => {
 		const rows = await query<{ role: string }>(
 			client,
@@ -131,9 +131,11 @@ export async function assertMembership(
 			[tenantId, userId],
 		)
 		if (rows.length === 0) throw new Error("not a member of this tenant")
-		return rows[0].role as "owner" | "admin" | "analyst" | "viewer"
+		return rows[0].role as TenantRole
 	})
 }
+
+export type TenantRole = "owner" | "admin" | "user" | "analyst" | "viewer"
 
 /** Roles allowed to approve or apply changes on a live Amazon account. */
 export const CAN_APPROVE = new Set(["owner", "admin"])
