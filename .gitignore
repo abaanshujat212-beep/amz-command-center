@@ -30,6 +30,9 @@ build/
 target/
 dbt_packages/
 logs/
+packages/dbt/profiles.yml
+packages/dbt/.user.yml
+.tmp/
 
 # Data — raw exports stay local
 data/
