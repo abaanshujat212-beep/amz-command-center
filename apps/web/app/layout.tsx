@@ -1,10 +1,11 @@
 import type { Metadata } from "next"
-import Link from "next/link"
 import "./globals.css"
 import { withTenant } from "@/lib/db"
 import { automationState, dataFreshness, tenantIdentity } from "@/lib/queries"
 import { currentTenantId } from "@/lib/session"
 import { AccountMenu } from "@/components/account-menu"
+import { AppShell } from "@/components/app-shell"
+import { SidebarNav } from "@/components/sidebar-nav"
 
 export const metadata: Metadata = {
 	title: "AXATY Command Center",
@@ -85,32 +86,7 @@ export default function RootLayout({
 	return (
 		<html lang="en">
 			<body>
-				<header className="border-b border-slate-200 bg-white">
-					<div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-						<nav className="flex items-center gap-6 text-sm">
-							<span className="font-semibold">AXATY</span>
-							<Link href="/" className="hover:underline">
-								Command Center
-							</Link>
-							<Link href="/search-terms" className="hover:underline">
-								Search terms
-							</Link>
-							<Link href="/opportunities" className="hover:underline">Products</Link>
-							<Link href="/sqp" className="hover:underline">SQP</Link>
-							<Link href="/economics" className="hover:underline">Economics</Link>
-							<Link href="/approvals" className="hover:underline">
-								Approvals
-							</Link>
-							<Link href="/history" className="hover:underline">
-								History
-							</Link>
-							<Link href="/settings/members" className="hover:underline">Team</Link>
-							<Link href="/settings/client" className="hover:underline">Settings</Link>
-						</nav>
-						<StatusBar />
-					</div>
-				</header>
-				<main className="mx-auto max-w-7xl px-6 py-8">{children}</main>
+				<AppShell sidebar={<SidebarNav />} status={<StatusBar />}>{children}</AppShell>
 			</body>
 		</html>
 	)

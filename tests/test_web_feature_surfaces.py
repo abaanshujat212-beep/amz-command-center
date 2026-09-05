@@ -5,14 +5,14 @@ ROOT = Path(__file__).parents[1]
 
 def test_completed_marts_have_discoverable_tenant_scoped_ui_queries():
     queries = (ROOT / "apps/web/lib/queries.ts").read_text(encoding="utf-8")
-    layout = (ROOT / "apps/web/app/layout.tsx").read_text(encoding="utf-8")
+    navigation = (ROOT / "apps/web/components/sidebar-nav.tsx").read_text(encoding="utf-8")
     for mart, route in (
         ("mart_product_opportunity", "/opportunities"),
         ("mart_sqp_opportunity", "/sqp"),
         ("mart_sku_economics", "/economics"),
     ):
         assert f'mart("{mart}")' in queries
-        assert route in layout
+        assert route in navigation
         assert (ROOT / f"apps/web/app{route}/page.tsx").is_file()
 
 
