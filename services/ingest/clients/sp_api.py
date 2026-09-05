@@ -55,7 +55,8 @@ class SpApiClient:
         self.tenant_id = tenant_id
         self.region = region
         self.timeout_s = timeout_s
-        self.base_url = (base_url or os.environ.get("SPAPI_ENDPOINT") or "").rstrip("/") or None
+        endpoint_override = base_url or os.environ.get("SPAPI_ENDPOINT") or ""
+        self.base_url = endpoint_override.rstrip(chr(47)) or None
         self._access_token: str | None = None
         self._access_expires_at: dt.datetime | None = None
 
@@ -103,14 +104,7 @@ class SpApiClient:
 
     def url(self, endpoint_key: str, **path_params: str) -> str:
         if self.base_url:
-            endpoint = ep.endpoint(endpoint_key)
-            path = endpoint.path
-            for name, value in path_params.items():
-                path = path.replace("{" + name + "}", str(value))
-            if "{" in path:
-                missing = path[path.index("{") :].split("}")[0].strip("{")
-                raise ValueError(f"{endpoint_key} needs path parameter '{missing}'")
-            return self.base_url + path
+            return ep.path_url_for(endpoint_key, self.base_url, **path_params)
         return ep.url_for(endpoint_key, region=self.region, **path_params)
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:

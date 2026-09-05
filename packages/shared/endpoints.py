@@ -212,16 +212,25 @@ def host_for(api: Api, region: str = DEFAULT_REGION) -> str:
     return r.sp_host if api == Api.SP_API else r.ads_host
 
 
-def url_for(key: str, region: str = DEFAULT_REGION, **path_params: str) -> str:
-    """Build a full URL from the catalog. Clients should use this, not f-strings."""
-    ep = endpoint(key)
-    path = ep.path
+def _path_for(key: str, **path_params: str) -> str:
+    path = endpoint(key).path
     for name, value in path_params.items():
         path = path.replace("{" + name + "}", str(value))
     if "{" in path:
         missing = path[path.index("{") :].split("}")[0].strip("{")
         raise ValueError(f"{key} needs path parameter '{missing}'")
-    return host_for(ep.api, region) + path
+    return path
+
+
+def url_for(key: str, region: str = DEFAULT_REGION, **path_params: str) -> str:
+    """Build a full URL from the catalog. Clients should use this, not f-strings."""
+    ep = endpoint(key)
+    return host_for(ep.api, region) + _path_for(key, **path_params)
+
+
+def path_url_for(key: str, base_url: str, **path_params: str) -> str:
+    """Build a full URL using a caller-supplied host and a catalogued path."""
+    return base_url + _path_for(key, **path_params)
 
 
 def catalogued_paths(api: Api) -> set[str]:
