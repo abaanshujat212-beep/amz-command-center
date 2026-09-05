@@ -6,7 +6,7 @@ import { currentTenantId } from "@/lib/session"
 export const dynamic = "force-dynamic"
 
 export async function GET() {
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 	const data = await withTenant(tenantId, async (client) => ({
 		automation: await automationState(client),
 		freshness: await dataFreshness(client),

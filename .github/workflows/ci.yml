@@ -166,6 +166,6 @@ jobs:
       - name: Build
         env:
           DATABASE_URL_APP: postgresql://axaty_app:axaty_app@localhost:5432/axaty
-          DEV_TENANT_ID: 00000000-0000-0000-0000-000000000001
-          DEV_OPERATOR_USER_ID: 00000000-0000-0000-0000-000000000002
+          BETTER_AUTH_SECRET: ci-only-secret-at-least-32-characters-long
+          BETTER_AUTH_URL: http://localhost:3000
         run: npm run build

@@ -13,7 +13,7 @@ export async function GET(
 	const url = new URL(request.url)
 	const days = parseDays(url.searchParams.get("days") ?? undefined)
 	const { campaignId } = await params
-	const tenantId = currentTenantId()
+	const tenantId = await currentTenantId()
 	const data = await withTenant(tenantId, async (client) => ({
 		days,
 		campaign: await campaignHeader(client, decodeURIComponent(campaignId), days),

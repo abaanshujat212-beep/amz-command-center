@@ -4,6 +4,7 @@ import "./globals.css"
 import { withTenant } from "@/lib/db"
 import { automationState, dataFreshness, tenantIdentity } from "@/lib/queries"
 import { currentTenantId } from "@/lib/session"
+import { AccountMenu } from "@/components/account-menu"
 
 export const metadata: Metadata = {
 	title: "AXATY Command Center",
@@ -20,7 +21,7 @@ async function StatusBar() {
 	let tenant: Awaited<ReturnType<typeof tenantIdentity>> = null
 
 	try {
-		const tenantId = currentTenantId()
+		const tenantId = await currentTenantId()
 		const result = await withTenant(tenantId, async (c) => ({
 			settings: await automationState(c),
 			freshness: await dataFreshness(c),
@@ -71,6 +72,7 @@ async function StatusBar() {
 					data {stalest.hours}h old ({stalest.dataset})
 				</span>
 			)}
+			<AccountMenu />
 		</div>
 	)
 }
@@ -102,6 +104,8 @@ export default function RootLayout({
 							<Link href="/history" className="hover:underline">
 								History
 							</Link>
+							<Link href="/settings/members" className="hover:underline">Team</Link>
+							<Link href="/settings/client" className="hover:underline">Settings</Link>
 						</nav>
 						<StatusBar />
 					</div>
