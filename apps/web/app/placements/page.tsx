@@ -1,0 +1,16 @@
+import Link from "next/link"
+import { withTenant } from "@/lib/db"
+import { acosTone, count, money, percent } from "@/lib/format"
+import { placementPerformance } from "@/lib/queries-feature-surfaces"
+import { ALLOWED_WINDOWS, parseDays, windowHref, type Window } from "@/lib/range"
+import { currentTenantId } from "@/lib/session"
+
+export const dynamic = "force-dynamic"
+
+function WindowPicker({ days }: { days: Window }) { return <div className="flex gap-1 text-xs">{ALLOWED_WINDOWS.map(d => <Link key={d} href={windowHref("/placements", d)} className={d===days ? "rounded bg-slate-900 px-2 py-1 text-white" : "rounded border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-100"}>{d}d</Link>)}</div> }
+
+export default async function Placements({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
+	const days = parseDays((await searchParams).days)
+	const rows = await withTenant(await currentTenantId(), c => placementPerformance(c, days))
+	return <div className="space-y-4"><div className="flex flex-wrap items-baseline justify-between gap-3"><div><h1 className="text-lg font-semibold">Placement performance</h1><p className="text-sm text-slate-600">Top of search, rest of search and product page performance from the placement mart. Placement modifiers stay read-only until Ads API approval and live baseline reads are proven.</p></div><WindowPicker days={days}/></div>{rows.length===0 ? <div className="rounded-lg border bg-white p-8 text-sm text-slate-600">No settled placement rows yet. Run Ads placement ingest and dbt build after Ads API access is approved.</div> : <div className="overflow-x-auto rounded border bg-white"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs uppercase text-slate-500"><th className="p-3">Campaign / placement</th><th className="p-3 num">Modifier</th><th className="p-3 num">Spend</th><th className="p-3 num">Sales</th><th className="p-3 num">ACOS</th><th className="p-3 num">CTR</th><th className="p-3 num">CVR</th><th className="p-3 num">Spend share</th><th className="p-3">Status</th></tr></thead><tbody>{rows.map(r => <tr key={`${r.campaign_id}:${r.placement}`} className="border-b align-top"><td className="p-3"><Link href={`/campaigns/${encodeURIComponent(r.campaign_id)}?days=${days}`} className="font-medium text-blue-700 hover:underline">{r.campaign_name}</Link><div className="text-xs text-slate-500">{r.placement}{r.placement_api_enum ? ` · ${r.placement_api_enum}` : ""}</div></td><td className="p-3 num">{r.placement_modifier_pct === null ? "—" : percent(r.placement_modifier_pct / 100)}</td><td className="p-3 num">{money(r.cost)}<div className="text-xs text-slate-500">{count(r.clicks)} clicks</div></td><td className="p-3 num">{money(r.sales)}<div className="text-xs text-slate-500">{count(r.orders)} orders</div></td><td className={`p-3 num tone-${acosTone(r.acos, r.break_even_acos)}`}>{percent(r.acos)}</td><td className="p-3 num">{percent(r.ctr, 2)}</td><td className="p-3 num">{percent(r.cvr)}</td><td className="p-3 num">{percent(r.spend_share)}</td><td className={r.economics_incomplete ? "p-3 tone-warn" : "p-3 tone-good"}>{r.economics_incomplete ? "costs missing" : "costed"}<div className="text-xs text-slate-500">CVR index {percent(r.cvr_index)}</div></td></tr>)}</tbody></table></div>}</div>
+}
