@@ -15,6 +15,18 @@ body {
 	@apply text-right tabular-nums;
 }
 
+@media (max-width: 767px) {
+	.num {
+		@apply whitespace-nowrap;
+	}
+	table {
+		min-width: 720px;
+	}
+	input, select, textarea, button {
+		font-size: 16px;
+	}
+}
+
 .tone-good {
 	@apply text-good;
 }
