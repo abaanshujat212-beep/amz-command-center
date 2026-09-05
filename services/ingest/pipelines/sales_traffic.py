@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import gzip
 import json
@@ -273,3 +274,31 @@ class _DryClient:
         return f"document-{report_id}"
     def download_report(self, document_id: str) -> bytes:
         return b'{"salesAndTrafficByAsin": []}'
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run SP-API Sales & Traffic ingestion")
+    parser.add_argument("--tenant-id", default=os.environ.get("DEV_TENANT_ID"))
+    parser.add_argument("--live", action="store_true", help="Call the configured SP-API endpoint")
+    parser.add_argument("--sandbox", action="store_true", help="Call SP-API sandbox endpoint from SPAPI_ENDPOINT")
+    parser.add_argument("--today", help="Override today's date as YYYY-MM-DD for smoke testing")
+    args = parser.parse_args()
+    if not args.tenant_id:
+        raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
+    if args.live and args.sandbox:
+        raise SystemExit("choose only one of --live or --sandbox")
+    if args.sandbox:
+        os.environ.setdefault("SPAPI_ENDPOINT", "https://sandbox.sellingpartnerapi-eu.amazon.com")
+    today = dt.date.fromisoformat(args.today) if args.today else None
+    result = run(args.tenant_id, dry_run=not (args.live or args.sandbox), today=today)
+    mode = "sandbox" if args.sandbox else "live" if args.live else "dry-run"
+    print(
+        f"sales_traffic mode={mode} requested={result.requested} succeeded={result.succeeded} "
+        f"failed={result.failed} rows_loaded={result.rows_loaded}"
+    )
+    for error in result.errors:
+        print(f"ERROR {error}")
+
+
+if __name__ == "__main__":
+    main()

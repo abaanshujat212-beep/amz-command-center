@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -47,12 +48,15 @@ class SpApiClient:
         tenant_id: str | None = None,
         region: str = ep.DEFAULT_REGION,
         timeout_s: float = 60.0,
+        base_url: str | None = None,
     ) -> None:
         self.credentials = credentials
         self.marketplace = marketplace
         self.tenant_id = tenant_id
         self.region = region
         self.timeout_s = timeout_s
+        endpoint_override = base_url or os.environ.get("SPAPI_ENDPOINT") or ""
+        self.base_url = endpoint_override.rstrip(chr(47)) or None
         self._access_token: str | None = None
         self._access_expires_at: dt.datetime | None = None
 
@@ -99,6 +103,8 @@ class SpApiClient:
         }
 
     def url(self, endpoint_key: str, **path_params: str) -> str:
+        if self.base_url:
+            return ep.path_url_for(endpoint_key, self.base_url, **path_params)
         return ep.url_for(endpoint_key, region=self.region, **path_params)
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:
