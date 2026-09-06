@@ -8,7 +8,7 @@ const sections = [
 	["/settings/members", "Team & roles"], ["/settings/ai", "AI models"],
 	["/settings/amazon", "Amazon integrations"], ["/settings/coverage", "Feature coverage"],
 	["/settings/email", "Email services"], ["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
-	["/settings/api-keys", "API keys"], ["/settings/audit", "Audit logs"],
+	["/settings/api-keys", "API keys"], ["/settings/mcp", "MCP readiness"], ["/settings/audit", "Audit logs"],
 ] as const
 
 export function SettingsNav() {
