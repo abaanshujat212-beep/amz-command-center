@@ -7,6 +7,10 @@ import type { CopilotResult } from "@/lib/copilot-execution"
 type SpeechRecognitionLike = { lang: string; interimResults: boolean; start: () => void; onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null }
 type SpeechWindow = Window & { SpeechRecognition?: new () => SpeechRecognitionLike; webkitSpeechRecognition?: new () => SpeechRecognitionLike }
 
+function errorResult(question: string, answer: string, source: "text" | "voice"): CopilotResult {
+	return { ok: false, question, tier: "T1", answer, notes: [], requiresConfirmation: false, source, runnerMode: "contract" }
+}
+
 export function CopilotForm() {
 	const [question, setQuestion] = useState("")
 	const [result, setResult] = useState<CopilotResult | null>(null)
@@ -18,13 +22,13 @@ export function CopilotForm() {
 		setResult(null)
 		const res = await fetch("/api/copilot", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question, source: inputSource }) })
 		const json = await res.json()
-		setResult(res.ok ? json : { ok: false, question, tier: "T1", answer: json.error ?? "Copilot request failed", notes: [], requiresConfirmation: false, source: inputSource })
+		setResult(res.ok ? json : errorResult(question, json.error ?? "Copilot request failed", inputSource))
 		setBusy(false)
 	}
 	function startVoice() {
 		const w = window as SpeechWindow
 		const Recognition = w.SpeechRecognition ?? w.webkitSpeechRecognition
-		if (!Recognition) { setResult({ ok: false, question, tier: "T1", answer: "This browser does not expose speech recognition. Type the Urdu/English command instead.", notes: ["text fallback available"], requiresConfirmation: false, source: "voice" }); return }
+		if (!Recognition) { setResult(errorResult(question, "This browser does not expose speech recognition. Type the Urdu/English command instead.", "voice")); return }
 		const rec = new Recognition()
 		rec.lang = "ur-PK"
 		rec.interimResults = false
