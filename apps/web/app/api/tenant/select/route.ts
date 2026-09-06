@@ -9,11 +9,7 @@ export async function POST(request: Request) {
 	const body = await request.json().catch(() => null) as { tenantId?: unknown } | null
 	const tenantId = typeof body?.tenantId === "string" ? body.tenantId.trim() : ""
 	if (!UUID.test(tenantId)) return Response.json({ error: "A valid tenant ID is required." }, { status: 400 })
-	try {
-		await assertMembership(tenantId, session.user.id)
-	} catch {
-		return Response.json({ error: "You are not a member of that tenant." }, { status: 403 })
-	}
+	try { await assertMembership(tenantId, session.user.id) } catch { return Response.json({ error: "You are not a member of that tenant." }, { status: 403 }) }
 	await authPool.query("update auth_session set active_tenant_id = $1, updated_at = now() where id = $2 and user_id = $3", [tenantId, session.session.id, session.user.id])
 	return Response.json({ ok: true, tenantId })
 }
