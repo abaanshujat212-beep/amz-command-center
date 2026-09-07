@@ -2,6 +2,7 @@ import Link from "next/link"
 import { SettingsCard, SettingsHeading, StatusPill } from "@/components/settings-ui"
 
 const rows = [
+	{ area: "Enterprise readiness", backend: "Documented: production hardening, Amazon evidence, write-back safety and ops blockers", frontend: "Coverage matrix links to the readiness audit; final production approval remains separate", href: "https://github.com/abaanshujat212-beep/amz-command-center/blob/main/docs/enterprise-readiness-audit.md", status: "partial" },
 	{ area: "SP-API Sales & Traffic", backend: "Implemented: client, raw load, parser, sandbox seed/setup, pipeline runs", frontend: "Visible in Amazon settings, Command Center product analytics, history/run evidence", href: "/settings/amazon", status: "covered" },
 	{ area: "Ads ingestion", backend: "Implemented: report orchestration, raw landing tables, HTTP client seam", frontend: "Campaign dashboard, search terms, placement surfaces and Ads approval/testing wizard; approval still externally blocked", href: "/settings/amazon", status: "partial" },
 	{ area: "Tenant access scopes", backend: "Implemented: per-member access_scopes and custom tenant role templates", frontend: "Members UI lets owners/admins assign feature scopes and owners save custom role templates", href: "/settings/members", status: "covered" },
