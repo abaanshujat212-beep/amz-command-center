@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth"
 
 export async function proxy(request: NextRequest) {
 	const pathname = request.nextUrl.pathname
-	if (pathname === "/login" || pathname.startsWith("/api/auth/") || pathname === "/api/tenant/select") {
+	if (pathname === "/login" || pathname.startsWith("/api/auth/") || pathname === "/api/tenant/select" || pathname === "/api/tenant/memberships") {
 		return NextResponse.next()
 	}
 	const session = await auth.api.getSession({ headers: request.headers })

@@ -27,6 +27,13 @@ def test_dashboard_does_not_route_staging_models_through_mart_views():
     assert 'mart("stg_' not in queries
 
 
+def test_dashboard_labels_sandbox_fixture_data():
+    page = (ROOT / "apps/web/app/page.tsx").read_text(encoding="utf-8")
+    queries = (ROOT / "apps/web/lib/queries.ts").read_text(encoding="utf-8")
+    assert "Sandbox demo data" in page
+    assert "selling_partner_id='sandbox'" in queries
+
+
 def test_approval_ui_blocks_unverified_live_action_types():
     support = (ROOT / "apps/web/lib/action-support.ts").read_text(encoding="utf-8")
     actions = (ROOT / "apps/web/app/approvals/actions.ts").read_text(encoding="utf-8")

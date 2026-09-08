@@ -33,3 +33,8 @@ export type SkuEconomics = { sku: string; asin: string | null; currency: string;
 export async function skuEconomics(client: PoolClient, limit = 200): Promise<SkuEconomics[]> { return query<SkuEconomics>(client, `select sku, asin, currency, avg_price, cogs, freight_in, fba_fee, storage_est, total_unit_cost, contribution_margin, contribution_margin_pct, break_even_acos, economics_incomplete from ${mart("mart_sku_economics")} order by economics_incomplete desc, sku limit $1`, [limit]) }
 export type PipelineRunSummary = { dataset: string; status: string; started_at: string; finished_at: string | null; rows_loaded: number | null; error: string | null }
 export async function recentPipelineRuns(client: PoolClient, limit = 20): Promise<PipelineRunSummary[]> { return query<PipelineRunSummary>(client, `select dataset, status, started_at::text, finished_at::text, rows_loaded, error from pipeline_run order by started_at desc limit $1`, [limit]) }
+
+export async function sandboxDemoEnabled(client: PoolClient, tenantId: string): Promise<boolean> {
+	const rows = await query<{ enabled: boolean }>(client, `select exists(select 1 from selling_account where tenant_id=$1 and selling_partner_id='sandbox') as enabled`, [tenantId])
+	return rows[0]?.enabled ?? false
+}
