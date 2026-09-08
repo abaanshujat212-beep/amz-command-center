@@ -178,11 +178,16 @@ class SpApiClient:
         self.check_attribution_granularity(report_type, report_options)
         if end < start:
             raise ValueError(f"end {end} is before start {start}")
+        # Reports API declares these fields as ISO-8601 date-times. Plain
+        # YYYY-MM-DD values are rejected by the static sandbox and are not a
+        # portable representation for the production endpoint.
+        start_time = dt.datetime.combine(start, dt.time.min, tzinfo=dt.timezone.utc)
+        end_time = dt.datetime.combine(end, dt.time.max, tzinfo=dt.timezone.utc)
         body: dict = {
             "reportType": report_type,
             "marketplaceIds": [self.marketplace.marketplace_id],
-            "dataStartTime": start.isoformat(),
-            "dataEndTime": end.isoformat(),
+            "dataStartTime": start_time.isoformat().replace("+00:00", "Z"),
+            "dataEndTime": end_time.isoformat().replace("+00:00", "Z"),
         }
         if report_options:
             body["reportOptions"] = report_options

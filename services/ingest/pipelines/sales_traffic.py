@@ -162,7 +162,7 @@ def persist_rotated_refresh_token(conn, connection: SpConnection, client: SalesT
     conn.execute(
         """
         update amazon_connection
-           set refresh_token_encrypted = %s, key_version = %s, updated_at = now()
+           set refresh_token_encrypted = %s, key_version = %s, last_refresh_at = now()
          where id = %s
         """,
         (sealed.ciphertext, sealed.key_version, connection.connection_id),

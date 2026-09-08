@@ -79,7 +79,13 @@ def test_call_uses_catalogued_url_and_body(monkeypatch):
 
 def test_create_report_returns_report_id(monkeypatch):
     c = client()
-    monkeypatch.setattr(c, "_call", lambda endpoint, body=None, **params: {"reportId": "r-1"})
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        return {"reportId": "r-1"}
+
+    monkeypatch.setattr(c, "_call", fake_call)
     monkeypatch.setattr(
         "services.ingest.clients.rate_limit.acquire_report_type",
         lambda _report_type: None,
@@ -94,6 +100,8 @@ def test_create_report_returns_report_id(monkeypatch):
         )
         == "r-1"
     )
+    assert calls[0][1]["dataStartTime"].endswith("T00:00:00Z")
+    assert calls[0][1]["dataEndTime"].endswith("T23:59:59.999999Z")
 
 
 def test_wait_for_report_returns_document_id(monkeypatch):

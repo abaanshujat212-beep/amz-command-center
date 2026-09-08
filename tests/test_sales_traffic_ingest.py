@@ -66,6 +66,8 @@ def test_persist_rotated_refresh_token_writes_ciphertext(monkeypatch):
     assert conn.calls
     sql, params = conn.calls[0]
     assert "refresh_token_encrypted" in sql
+    assert "last_refresh_at = now()" in sql
+    assert "updated_at" not in sql
     assert params[1] == 1
     assert params[2] == "conn-1"
     assert params[0] != b"rotated-token"

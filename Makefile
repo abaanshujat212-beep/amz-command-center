@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed test fmt lint dbt actions actions-live scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt actions actions-live scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -20,6 +20,7 @@ help:
 	@echo "testdb            create the test database"
 	@echo "migrate-test      apply migrations to TEST_DATABASE_URL"
 	@echo "seed              insert tenants and the starter rules"
+	@echo "seed-spapi-sandbox-demo  load clearly labelled local SP-API sandbox fixtures"
 	@echo "test              run pytest (includes the RLS isolation gate)"
 	@echo "dbt               run dbt build"
 	@echo ""
@@ -72,6 +73,9 @@ migrate-test:
 
 seed:
 	@$(ENV) python -m packages.db.seed
+
+seed-spapi-sandbox-demo:
+	@$(ENV) python -m packages.db.seed_spapi_sandbox_demo
 
 test:
 	@$(ENV) pytest -q

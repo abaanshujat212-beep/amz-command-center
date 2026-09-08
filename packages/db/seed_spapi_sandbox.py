@@ -43,28 +43,28 @@ def seed_spapi_sandbox(*, tenant_slug: str = DEFAULT_TENANT_SLUG) -> str:
         row = conn.execute(
             """
             insert into amazon_connection (
-                tenant_id, provider, region, seller_account_id,
+                tenant_id, provider, region,
                 refresh_token_encrypted, key_version, status
             )
-            values (%s, 'sp_api', %s, %s, %s, %s, 'active')
-            on conflict (tenant_id, provider, seller_account_id) do update set
+            values (%s, 'sp_api', %s, %s, %s, 'pending')
+            on conflict (tenant_id, provider, region) do update set
                 region = excluded.region,
                 refresh_token_encrypted = excluded.refresh_token_encrypted,
                 key_version = excluded.key_version,
-                status = 'active',
-                updated_at = now()
+                status = 'pending'
             returning id
             """,
-            (tenant_id, region, seller_account_id, sealed.ciphertext, sealed.key_version),
+            (tenant_id, region, sealed.ciphertext, sealed.key_version),
         ).fetchone()
         conn.execute(
             """
-            insert into selling_account (tenant_id, connection_id, marketplace_id, seller_id)
+            insert into selling_account (tenant_id, connection_id, marketplace_ids, selling_partner_id)
             values (%s, %s, %s, %s)
-            on conflict (tenant_id, marketplace_id, seller_id) do update set
-                connection_id = excluded.connection_id
+            on conflict (tenant_id, selling_partner_id) do update set
+                connection_id = excluded.connection_id,
+                marketplace_ids = excluded.marketplace_ids
             """,
-            (tenant_id, row["id"], marketplace_id, seller_account_id),
+            (tenant_id, row["id"], [marketplace_id], seller_account_id),
         )
         conn.commit()
     print(f"SP-API sandbox connection ready for tenant {tenant_slug} ({tenant_id})")
