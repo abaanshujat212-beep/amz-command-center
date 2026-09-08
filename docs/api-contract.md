@@ -6,8 +6,16 @@ Status: MVP API boundary contract.
 
 - Browser routes use authenticated user sessions.
 - Every request resolves an active tenant from `session.active_tenant_id`.
-- API key support is read-scoped by default; raw keys are shown once and only hashes are stored.
+- API key support stores raw keys once and persists only hashes.
 - Users can only enter tenants where they have membership.
+
+## API key scopes
+
+- `read` — default scope for KPI, history, opportunity, approval-list and verification reads.
+- `approve` — sensitive scope for guarded approval/rejection contracts. Requires owner/admin route checks and audit logging.
+- `write` — reserved sensitive scope for future write-capable tools. Disabled by default and must never directly mutate Amazon without the approval/worker path.
+
+Sensitive scopes must show operator warnings when created and remain revocable from settings.
 
 ## Tenant isolation
 
@@ -59,7 +67,7 @@ Any future mutating route must include:
 
 ## API/MCP sensitive write scopes
 
-Sensitive API/MCP write scopes are tracked separately in #124. They should remain disabled by default until a settings UI, warning banner, RBAC, idempotency and audit coverage exist.
+Sensitive API/MCP write scopes are tracked in #124. They remain disabled by default unless an owner/admin deliberately creates scoped keys and accepts warning UI. Route-level RBAC, idempotency and audit checks are still required before any write-capable endpoint/tool can use those scopes.
 
 ## Mobile client contract
 
