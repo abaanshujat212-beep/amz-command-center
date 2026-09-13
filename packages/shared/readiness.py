@@ -3,6 +3,7 @@
 Documentation or fixture evidence is intentionally not sufficient for LIVE_READY.
 The database additionally requires an evidence source and observed timestamp.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -29,7 +30,10 @@ class EvidenceKind(StrEnum):
     AUTHORIZED_LIVE_WRITE = "authorized_live_write"
 
 
-LIVE_EVIDENCE = {EvidenceKind.AUTHORIZED_LIVE_READ, EvidenceKind.AUTHORIZED_LIVE_WRITE}
+LIVE_EVIDENCE = {
+    EvidenceKind.AUTHORIZED_LIVE_READ,
+    EvidenceKind.AUTHORIZED_LIVE_WRITE,
+}
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,13 @@ class ReadinessEvidence:
             raise ValueError("evidence timestamp must be timezone-aware")
 
 
-def validated_state(requested: ReadinessState, evidence: ReadinessEvidence | None) -> ReadinessState:
+def validated_state(
+    requested: ReadinessState,
+    evidence: ReadinessEvidence | None,
+) -> ReadinessState:
     """Fail closed when LIVE_READY lacks authorized live evidence."""
-    if requested is ReadinessState.LIVE_READY and (evidence is None or evidence.kind not in LIVE_EVIDENCE):
+    missing_live_evidence = evidence is None or evidence.kind not in LIVE_EVIDENCE
+    if requested is ReadinessState.LIVE_READY and missing_live_evidence:
         raise ValueError("LIVE_READY requires authorized live evidence")
     if evidence and evidence.observed_at > datetime.now(timezone.utc):
         raise ValueError("evidence timestamp cannot be in the future")
