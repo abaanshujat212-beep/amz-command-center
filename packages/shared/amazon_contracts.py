@@ -3,6 +3,7 @@
 Static verification proves only that code matches the reviewed contract. It must
 never be interpreted as authorized production evidence or LIVE_READY status.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,7 +13,13 @@ from typing import Any
 from packages.shared.endpoints import Api, Endpoint, endpoint
 
 UK_MARKETPLACE_ID = "A1F83G8C2ARO7P"
-ADS_REQUIRED_HEADERS = frozenset({"Amazon-Advertising-API-ClientId", "Authorization", "Amazon-Advertising-API-Scope"})
+ADS_REQUIRED_HEADERS = frozenset(
+    {
+        "Amazon-Advertising-API-ClientId",
+        "Authorization",
+        "Amazon-Advertising-API-Scope",
+    }
+)
 SP_REQUIRED_HEADERS = frozenset({"Authorization", "x-amz-access-token"})
 
 
@@ -32,7 +39,10 @@ class ContractEvidence:
 
     @property
     def production_evidence(self) -> bool:
-        return self.level in {VerificationLevel.AUTHORIZED_LIVE_READ, VerificationLevel.AUTHORIZED_LIVE_WRITE}
+        return self.level in {
+            VerificationLevel.AUTHORIZED_LIVE_READ,
+            VerificationLevel.AUTHORIZED_LIVE_WRITE,
+        }
 
 
 def validate_headers(endpoint_key: str, headers: dict[str, str]) -> None:
@@ -60,7 +70,14 @@ def validate_payload(endpoint_key: str, payload: dict[str, Any] | None) -> None:
         if missing:
             raise ValueError(f"missing Ads report fields: {sorted(missing)}")
         config = payload["configuration"]
-        for key in ("adProduct", "groupBy", "columns", "reportTypeId", "timeUnit", "format"):
+        for key in (
+            "adProduct",
+            "groupBy",
+            "columns",
+            "reportTypeId",
+            "timeUnit",
+            "format",
+        ):
             if key not in config:
                 raise ValueError(f"missing Ads report configuration.{key}")
         if not config["groupBy"] or not config["columns"]:
@@ -76,7 +93,9 @@ def validate_payload(endpoint_key: str, payload: dict[str, Any] | None) -> None:
 
 def assert_live_ready_evidence(evidence: ContractEvidence) -> None:
     if not evidence.production_evidence:
-        raise ValueError("fixture, documentation and sandbox evidence cannot mark LIVE_READY")
+        raise ValueError(
+            "fixture, documentation and sandbox evidence cannot mark LIVE_READY"
+        )
     ep = endpoint(evidence.endpoint_key)
     if ep.api is Api.ADS and not evidence.profile_id:
         raise ValueError("Ads live evidence must identify the advertiser profile")
