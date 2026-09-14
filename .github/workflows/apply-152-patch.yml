@@ -1,0 +1,21 @@
+name: Apply 152 patch
+on:
+  push:
+    branches: [feat/152-transactional-worker-audit]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/152-transactional-worker-audit
+      - run: python .tmp/apply_152_patch.py
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add services/actions/state_machine.py services/actions/worker.py services/actions/verification.py
+          git diff --cached --quiet || git commit -m "feat: instrument worker and verification transitions"
+          git push
