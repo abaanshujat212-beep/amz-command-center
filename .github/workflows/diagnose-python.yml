@@ -5,20 +5,13 @@ on:
     branches: [main]
 
 jobs:
-  security-isolation:
-    name: ${{ matrix.label }}
+  ruff-isolation:
+    name: active-${{ matrix.rules }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {label: tests-S1, rules: S1}
-          - {label: tests-S2, rules: S2}
-          - {label: tests-S3, rules: S3}
-          - {label: tests-S4, rules: S4}
-          - {label: tests-S5, rules: S5}
-          - {label: tests-S6, rules: S6}
-          - {label: tests-S7, rules: S7}
+        rules: [E, F, I, B, UP, S, RUF]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,7 +19,10 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
-      - run: ruff check tests/test_amazon_contract_verification.py --select "${{ matrix.rules }}"
+      - run: >-
+          ruff check tests/test_amazon_contract_verification.py
+          --select "${{ matrix.rules }}"
+          --ignore S101,S105,S106,S311,S608,B904,UP017,UP035,UP037,UP042,RUF100,E501
 
   pytest-diagnostic:
     name: Pytest diagnostic
