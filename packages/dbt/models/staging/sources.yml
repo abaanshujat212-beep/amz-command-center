@@ -32,3 +32,5 @@ sources:
       - name: sku_cost_ledger
       - name: tenant
       - name: tenant_settings
+      - name: cogs_calculation_run
+      - name: cogs_allocation
