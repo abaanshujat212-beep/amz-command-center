@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
@@ -34,12 +35,35 @@ def test_dashboard_labels_sandbox_fixture_data():
     assert "selling_partner_id='sandbox'" in queries
 
 
-def test_approval_ui_blocks_unverified_live_action_types():
+def test_approval_ui_uses_canonical_false_by_default_capability_registry():
     support = (ROOT / "apps/web/lib/action-support.ts").read_text(encoding="utf-8")
-    actions = (ROOT / "apps/web/app/approvals/actions.ts").read_text(encoding="utf-8")
+    decision = (ROOT / "apps/web/lib/approval-decision.ts").read_text(encoding="utf-8")
     page = (ROOT / "apps/web/app/approvals/page.tsx").read_text(encoding="utf-8")
-    assert "LIVE_SUPPORTED" in support
-    assert "liveActionSupport" in actions
+    registry = json.loads(
+        (ROOT / "packages/shared/action_capabilities.json").read_text(encoding="utf-8")
+    )
+    independent = {
+        "recommendation_supported",
+        "approval_supported",
+        "live_baseline_read_supported",
+        "live_apply_supported",
+        "rollback_supported",
+        "verification_supported",
+    }
+    assert all(independent <= set(item) for item in registry.values())
+    assert "LIVE_SUPPORTED" not in support
+    assert "action_capabilities.json" in support
+    assert "?? EMPTY" in support  # unknown combinations fail closed
+    assert "capability.approval_supported" in support
+    assert all(f"capability.{field}" in support for field in independent - {"approval_supported"})
+    assert 'readinessState === "LIVE_READY"' in support
+    assert "AUTHORIZED_LIVE_READ" in support and "AUTHORIZED_LIVE_WRITE" in support
+    assert "STATIC_CONTRACT" not in support and "SANDBOX" not in support
+    local = registry["*:flag"]
+    assert local["local_only"] and not local["approval_supported"]
+    assert not local["live_apply_supported"]
+    assert "liveActionSupport" in decision
+    assert "external_dependency_state" in decision
     assert "!live.supported" in page
 
 

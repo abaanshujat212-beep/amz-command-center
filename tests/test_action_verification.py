@@ -1,6 +1,7 @@
 import datetime as dt
 
 from services.actions import state_machine as sm
+from services.actions.audit import EventType
 from services.actions.verification import MetricWindow, judge, placement_window, verify_action
 
 
@@ -14,7 +15,6 @@ class FakeConn:
         self.queries.append((sql, params))
         if sql.strip().startswith("update action"):
             self.updates.append((sql, params))
-            return self
         return self
 
     def fetchone(self):
@@ -54,9 +54,10 @@ def test_placement_window_splits_entity_id():
     assert conn.queries[0][1][1:3] == ("c1", "top_of_search")
 
 
-def test_verify_action_persists_verified_status():
+def test_verify_action_persists_state_and_all_checkpoints(monkeypatch):
+    events = []
+    monkeypatch.setattr("services.actions.verification.append_event", lambda _conn, event: events.append(event))
     now = dt.datetime(2026, 8, 25, tzinfo=dt.timezone.utc)
-    applied_at = now - dt.timedelta(days=8)
     action = sm.Action(
         id="a1",
         tenant_id="t1",
@@ -66,7 +67,8 @@ def test_verify_action_persists_verified_status():
         before_value={"value": 1.0},
         after_value={"value": 1.1},
         status=sm.Status.APPLIED,
-        applied_at=applied_at,
+        applied_at=now - dt.timedelta(days=8),
+        idempotency_key="idem-1",
     )
     conn = FakeConn([
         {"cost": 50, "sales": 100, "clicks": 50, "orders": 5},
@@ -76,5 +78,14 @@ def test_verify_action_persists_verified_status():
     assert updated.status == sm.Status.VERIFIED
     assert updated.outcome == "improved"
     assert conn.updates
-    impact = conn.updates[0][1][3].obj
-    assert impact["entity_type"] == "keyword"
+    assert [event.event_type for event in events] == [
+        EventType.VERIFICATION_SCHEDULED,
+        EventType.VERIFICATION_CHECKPOINT,
+        EventType.VERIFICATION_CHECKPOINT,
+        EventType.VERIFICATION_RESULT,
+        EventType.VERIFICATION_TERMINAL,
+    ]
+    assert [event.verification_checkpoint for event in events[1:3]] == [
+        "before_window_loaded",
+        "after_window_loaded",
+    ]
