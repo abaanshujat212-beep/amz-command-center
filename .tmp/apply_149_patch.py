@@ -43,7 +43,7 @@ text = text.replace(
     "    def rollback(self, action: sm.Action) -> dict:\n        if action.before_value is None:",
     "    def rollback(self, action: sm.Action) -> dict:\n        self._require(action, \"rollback\")\n        if action.before_value is None:",
 )
-insert = """
+insert = '''
 
 def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]:
     row = conn.execute(
@@ -59,7 +59,7 @@ def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]
     if row is None:
         return None, None
     return row["readiness_state"], row["verification_level"]
-"""
+'''
 marker = "\ndef persist_rotated_refresh_token(conn, ads: AdsClient) -> None:\n"
 if marker not in text:
     raise SystemExit("worker readiness insertion point not found")
