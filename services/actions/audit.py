@@ -85,7 +85,7 @@ def append_event(conn, event: ExecutionEvent) -> str | None:
         values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,%s)
         on conflict (tenant_id, action_id, event_type, dedupe_key) do nothing
-        returning id::text
+        returning id::text as event_id
         """,
         (
             event.tenant_id,
@@ -114,7 +114,9 @@ def append_event(conn, event: ExecutionEvent) -> str | None:
             psycopg.types.json.Jsonb(sanitize(event.metadata)),
         ),
     ).fetchone()
-    return None if row is None else row[0]
+    if row is None:
+        return None
+    return row["event_id"] if isinstance(row, dict) else row[0]
 
 
 def event_for(action, event_type: EventType, *, correlation_key: str, dedupe_key: str, **values) -> ExecutionEvent:

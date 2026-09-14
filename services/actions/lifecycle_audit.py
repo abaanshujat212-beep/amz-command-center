@@ -8,8 +8,20 @@ from services.actions import state_machine as sm
 from services.actions.audit import EventType, append_event, event_for
 
 
-def record_retry(conn, action: sm.Action, *, attempt: int, correlation_key: str, exhausted: bool = False) -> None:
-    kind = EventType.RETRY_EXHAUSTED if exhausted else EventType.RETRY_SCHEDULED
+def record_retry(conn, action: sm.Action, *, attempt: int, correlation_key: str, exhausted: bool = False) -> sm.Action:
+    previous = action.status.value
+    if exhausted:
+        kind = EventType.RETRY_EXHAUSTED
+        new_state = previous
+    else:
+        kind = EventType.RETRY_SCHEDULED
+        action = sm.retry(action)
+        new_state = action.status.value
+        conn.execute(
+            """update action set status=%s,error=null,approved_by=null,approved_at=null
+                 where tenant_id=%s and id=%s""",
+            (new_state, action.tenant_id, action.id),
+        )
     append_event(
         conn,
         event_for(
@@ -18,10 +30,11 @@ def record_retry(conn, action: sm.Action, *, attempt: int, correlation_key: str,
             correlation_key=correlation_key,
             dedupe_key=f"retry:{attempt}:{kind.value}",
             retry_attempt=attempt,
-            previous_state=action.status.value,
-            new_state=action.status.value if exhausted else sm.Status.PENDING.value,
+            previous_state=previous,
+            new_state=new_state,
         ),
     )
+    return action
 
 
 def record_retry_attempt(conn, action: sm.Action, *, attempt: int, correlation_key: str) -> None:
