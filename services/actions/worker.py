@@ -193,7 +193,6 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
     return ads
 
 
-
 def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]:
     row = conn.execute(
         """
@@ -209,6 +208,7 @@ def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]
         return None, None
     return row["readiness_state"], row["verification_level"]
 
+
 def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
     connection_id = getattr(ads, "connection_id", None)
     if connection_id is None:
@@ -222,7 +222,6 @@ def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
         """,
         (sealed.ciphertext, sealed.key_version, connection_id),
     )
-
 
 
 def record_apply_start(conn, action: sm.Action, *, correlation_key: str, attempt: int = 1) -> None:
@@ -243,6 +242,7 @@ def record_apply_start(conn, action: sm.Action, *, correlation_key: str, attempt
                 new_state=action.status.value,
             ),
         )
+
 
 def persist_apply_result(
     conn,
