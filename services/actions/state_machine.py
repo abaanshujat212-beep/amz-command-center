@@ -74,6 +74,7 @@ class Action:
     rolled_back_at: dt.datetime | None = None
     outcome: str | None = None
     error: str | None = None
+    idempotency_key: str | None = None
 
     @property
     def expires_at(self) -> dt.datetime:
