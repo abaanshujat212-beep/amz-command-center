@@ -12,6 +12,7 @@ from typing import Protocol
 import psycopg
 from psycopg.rows import dict_row
 
+from packages.shared.action_capabilities import assert_worker_capability
 from services.actions import state_machine as sm
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
@@ -49,10 +50,22 @@ class DryRunActionClient:
 class AdsActionClient:
     """Translate approved action rows into Ads API reads and mutations."""
 
-    def __init__(self, ads: AdsClient) -> None:
+    def __init__(self, ads: AdsClient, readiness_state: str | None, verification_level: str | None) -> None:
         self.ads = ads
+        self.readiness_state = readiness_state
+        self.verification_level = verification_level
+
+    def _require(self, action: sm.Action, phase: str) -> None:
+        assert_worker_capability(
+            action.entity_type,
+            action.action_type,
+            phase=phase,
+            readiness_state=self.readiness_state,
+            verification_level=self.verification_level,
+        )
 
     def read_before_value(self, action: sm.Action) -> dict | None:
+        self._require(action, "baseline")
         if action.action_type == "set_bid" and action.entity_type == "keyword":
             return self.ads.keyword_bid(action.entity_id)
         if action.action_type == "set_bid" and action.entity_type == "target":
@@ -66,6 +79,7 @@ class AdsActionClient:
         )
 
     def apply(self, action: sm.Action) -> dict:
+        self._require(action, "apply")
         value = action.after_value.get("value")
         if action.action_type == "set_bid" and action.entity_type == "keyword":
             return self.ads.update_bid(action.entity_id, float(value), dry_run=False)
@@ -82,6 +96,7 @@ class AdsActionClient:
         raise NotImplementedError(f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}")
 
     def rollback(self, action: sm.Action) -> dict:
+        self._require(action, "rollback")
         if action.before_value is None:
             raise RuntimeError("cannot rollback without before_value")
         original = action.before_value.get("value")
@@ -175,6 +190,22 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
     ads.connection_id = row["id"]
     return ads
 
+
+
+def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]:
+    row = conn.execute(
+        """
+        select readiness_state, metadata->>'verification_level' as verification_level
+          from external_dependency_state
+         where tenant_id = %s and module_key = 'ppc' and dependency_key = 'amazon_ads'
+         order by updated_at desc
+         limit 1
+        """,
+        (tenant_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    return row["readiness_state"], row["verification_level"]
 
 def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
     connection_id = getattr(ads, "connection_id", None)
@@ -314,7 +345,8 @@ def run_once(
                         finish_worker_run(conn, run_id, result, error=str(exc))
                         conn.commit()
                         return result
-                    client = AdsActionClient(ads_client)
+                    readiness_state, verification_level = load_action_readiness(conn, tenant_id)
+                    client = AdsActionClient(ads_client, readiness_state, verification_level)
                 else:
                     client = DryRunActionClient()
             actions = fetch_approved(conn, tenant_id, limit)
