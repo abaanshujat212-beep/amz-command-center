@@ -1,0 +1,26 @@
+name: Diagnose 149 test
+on:
+  push:
+    branches: [feat/149-action-capability-registry]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/149-action-capability-registry
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e '.[dev]'
+      - run: pytest -q tests/test_web_feature_surfaces.py tests/test_action_capabilities.py > /tmp/test.log 2>&1 || true
+      - run: |
+          cp /tmp/test.log docs/.ci-149-test.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/.ci-149-test.txt
+          git commit -m "ci: record final capability test diagnostics"
+          git push
