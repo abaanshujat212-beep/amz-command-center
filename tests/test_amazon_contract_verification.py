@@ -2,8 +2,8 @@ import pytest
 
 from packages.shared.amazon_contracts import (
     ADS_REQUIRED_HEADERS,
-    ContractEvidence,
     SP_REQUIRED_HEADERS,
+    ContractEvidence,
     VerificationLevel,
     assert_live_ready_evidence,
     validate_headers,
