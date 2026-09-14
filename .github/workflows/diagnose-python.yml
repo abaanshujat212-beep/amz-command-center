@@ -1,0 +1,30 @@
+name: Python diagnostics
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ruff-diagnostic:
+    name: Ruff diagnostic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+
+  pytest-diagnostic:
+    name: Pytest diagnostic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: pytest -q -m "not db"
