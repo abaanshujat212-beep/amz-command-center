@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 
 from packages.shared.action_capabilities import assert_worker_capability
 from services.actions import state_machine as sm
+from services.actions.audit import EventType, append_event, event_for, sanitize
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
 
@@ -120,6 +121,7 @@ def _to_action(row: dict) -> sm.Action:
         approved_by=str(row["approved_by"]) if row["approved_by"] else None,
         approved_at=row["approved_at"],
         applied_at=row["applied_at"],
+        idempotency_key=row["idempotency_key"],
     )
 
 
@@ -127,7 +129,7 @@ def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
     rows = conn.execute(
         """
         select id, tenant_id, entity_type, entity_id, action_type, before_value,
-               after_value, status, approved_by, approved_at, applied_at
+               after_value, status, approved_by, approved_at, applied_at, idempotency_key
           from action
          where tenant_id = %s and status = 'approved'
          order by approved_at nulls first, requested_at
@@ -191,7 +193,6 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
     return ads
 
 
-
 def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]:
     row = conn.execute(
         """
@@ -206,6 +207,7 @@ def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]
     if row is None:
         return None, None
     return row["readiness_state"], row["verification_level"]
+
 
 def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
     connection_id = getattr(ads, "connection_id", None)
@@ -222,7 +224,34 @@ def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
     )
 
 
-def persist_apply_result(conn, action: sm.Action, api_response: dict | None = None) -> None:
+def record_apply_start(conn, action: sm.Action, *, correlation_key: str, attempt: int = 1) -> None:
+    for kind, suffix in (
+        (EventType.APPLY_REQUESTED, "requested"),
+        (EventType.APPLY_STARTED, "started"),
+    ):
+        append_event(
+            conn,
+            event_for(
+                action,
+                kind,
+                correlation_key=correlation_key,
+                dedupe_key=f"apply:{attempt}:{correlation_key}:{suffix}",
+                retry_attempt=attempt,
+                actor_id="action-worker",
+                previous_state=action.status.value,
+                new_state=action.status.value,
+            ),
+        )
+
+
+def persist_apply_result(
+    conn,
+    action: sm.Action,
+    api_response: dict | None = None,
+    *,
+    correlation_key: str | None = None,
+    attempt: int = 1,
+) -> None:
     conn.execute(
         """
         update action
@@ -235,9 +264,37 @@ def persist_apply_result(conn, action: sm.Action, api_response: dict | None = No
             psycopg.types.json.Jsonb(action.before_value),
             action.applied_at,
             action.error,
-            psycopg.types.json.Jsonb(api_response or {}),
+            psycopg.types.json.Jsonb(sanitize(api_response or {})),
             action.tenant_id,
             action.id,
+        ),
+    )
+    if correlation_key is None:
+        return
+    drift = action.status == sm.Status.FAILED and bool(action.error and action.error.startswith("drift:"))
+    if drift:
+        kind = EventType.DRIFT_BLOCKED
+        classification = "drift_blocked"
+    elif action.status == sm.Status.APPLIED:
+        kind = EventType.APPLY_SUCCEEDED
+        classification = "success"
+    else:
+        kind = EventType.APPLY_FAILED
+        classification = "failed"
+    append_event(
+        conn,
+        event_for(
+            action,
+            kind,
+            correlation_key=correlation_key,
+            dedupe_key=f"apply:{attempt}:{correlation_key}:result",
+            retry_attempt=attempt,
+            actor_id="action-worker",
+            previous_state=sm.Status.APPROVED.value,
+            new_state=action.status.value,
+            applied_value=api_response if action.status == sm.Status.APPLIED else None,
+            provider_result_classification=classification,
+            metadata={"error": action.error} if action.error else {},
         ),
     )
 
@@ -352,8 +409,16 @@ def run_once(
             actions = fetch_approved(conn, tenant_id, limit)
             result.scanned = len(actions)
             for action in actions:
+                correlation_key = str(run_id)
+                if live_ads:
+                    record_apply_start(conn, action, correlation_key=correlation_key)
                 updated, response = apply_action(action, client, now=now)
-                persist_apply_result(conn, updated, response)
+                persist_apply_result(
+                    conn,
+                    updated,
+                    response,
+                    correlation_key=correlation_key if live_ads else None,
+                )
                 if updated.status == sm.Status.APPLIED:
                     result.applied += 1
                 else:
@@ -364,9 +429,8 @@ def run_once(
                 persist_rotated_refresh_token(conn, ads_client)
             finish_worker_run(conn, run_id, result)
             conn.commit()
-        except Exception as exc:
-            finish_worker_run(conn, run_id, result, error=str(exc))
-            conn.commit()
+        except Exception:
+            conn.rollback()
             raise
     return result
 

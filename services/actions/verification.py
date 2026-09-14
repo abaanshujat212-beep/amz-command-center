@@ -11,6 +11,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from services.actions import state_machine as sm
+from services.actions.audit import EventType, append_event, event_for
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 WINDOW_DAYS = 7
@@ -55,6 +56,7 @@ def _to_action(row: dict) -> sm.Action:
         after_value=row["after_value"],
         status=sm.Status(row["status"]),
         applied_at=row["applied_at"],
+        idempotency_key=row["idempotency_key"],
     )
 
 
@@ -62,7 +64,7 @@ def fetch_due_actions(conn, tenant_id: str, now: dt.datetime, limit: int) -> lis
     rows = conn.execute(
         """
         select id, tenant_id, entity_type, entity_id, action_type, before_value,
-               after_value, status, applied_at
+               after_value, status, applied_at, idempotency_key
           from action
          where tenant_id = %s
            and status = 'applied'
@@ -189,6 +191,20 @@ def judge(before: MetricWindow, after: MetricWindow) -> tuple[str, dict]:
 
 def verify_action(conn, action: sm.Action, *, now: dt.datetime) -> sm.Action:
     assert action.applied_at is not None
+    correlation_key = f"verification:{action.id}:{action.applied_at.isoformat()}"
+    append_event(
+        conn,
+        event_for(
+            action,
+            EventType.VERIFICATION_SCHEDULED,
+            correlation_key=correlation_key,
+            dedupe_key="verification:scheduled",
+            actor_type="system",
+            actor_id="verification-worker",
+            previous_state=action.status.value,
+            new_state=action.status.value,
+        ),
+    )
     applied_date = action.applied_at.date()
     before = performance_window(
         conn,
@@ -196,11 +212,37 @@ def verify_action(conn, action: sm.Action, *, now: dt.datetime) -> sm.Action:
         applied_date - dt.timedelta(days=WINDOW_DAYS),
         applied_date,
     )
+    append_event(
+        conn,
+        event_for(
+            action,
+            EventType.VERIFICATION_CHECKPOINT,
+            correlation_key=correlation_key,
+            dedupe_key="verification:before-window",
+            actor_type="system",
+            actor_id="verification-worker",
+            verification_checkpoint="before_window_loaded",
+            metadata={"window": before.__dict__},
+        ),
+    )
     after = performance_window(
         conn,
         action,
         applied_date,
         applied_date + dt.timedelta(days=WINDOW_DAYS),
+    )
+    append_event(
+        conn,
+        event_for(
+            action,
+            EventType.VERIFICATION_CHECKPOINT,
+            correlation_key=correlation_key,
+            dedupe_key="verification:after-window",
+            actor_type="system",
+            actor_id="verification-worker",
+            verification_checkpoint="after_window_loaded",
+            metadata={"window": after.__dict__},
+        ),
     )
     outcome, impact = judge(before, after)
     impact["entity_type"] = action.entity_type
@@ -213,6 +255,26 @@ def verify_action(conn, action: sm.Action, *, now: dt.datetime) -> sm.Action:
         """,
         (updated.status.value, updated.verified_at, updated.outcome, psycopg.types.json.Jsonb(impact), updated.tenant_id, updated.id),
     )
+    for kind, suffix in (
+        (EventType.VERIFICATION_RESULT, "result"),
+        (EventType.VERIFICATION_TERMINAL, "terminal"),
+    ):
+        append_event(
+            conn,
+            event_for(
+                updated,
+                kind,
+                correlation_key=correlation_key,
+                dedupe_key=f"verification:{suffix}",
+                actor_type="system",
+                actor_id="verification-worker",
+                previous_state=sm.Status.APPLIED.value,
+                new_state=updated.status.value,
+                provider_result_classification=outcome,
+                verification_checkpoint=outcome,
+                metadata={"impact": impact},
+            ),
+        )
     return updated
 
 
