@@ -28,7 +28,7 @@ export function actionCapability(entityType: string, actionType: string): Capabi
 export function liveActionSupport(entityType: string, actionType: string, readinessState?: string, verificationLevel?: string): { supported: boolean; message: string; capability: Capability } {
 	const capability = actionCapability(entityType, actionType)
 	const authorizedEvidence = verificationLevel === "AUTHORIZED_LIVE_READ" || verificationLevel === "AUTHORIZED_LIVE_WRITE"
-	const complete = capability.approval_supported && capability.live_baseline_read_supported && capability.live_apply_supported && capability.rollback_supported && capability.verification_supported
+	const complete = capability.recommendation_supported && capability.approval_supported && capability.live_baseline_read_supported && capability.live_apply_supported && capability.rollback_supported && capability.verification_supported && !capability.local_only
 	if (complete && readinessState === "LIVE_READY" && authorizedEvidence) {
 		return { supported: true, message: "Capability is live-ready with authorized evidence.", capability }
 	}
