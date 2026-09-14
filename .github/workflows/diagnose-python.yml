@@ -5,9 +5,27 @@ on:
     branches: [main]
 
 jobs:
-  ruff-diagnostic:
-    name: Ruff diagnostic
+  ruff-isolation:
+    name: ${{ matrix.label }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {label: contracts-E, target: packages/shared/amazon_contracts.py, rules: E}
+          - {label: contracts-F, target: packages/shared/amazon_contracts.py, rules: F}
+          - {label: contracts-I, target: packages/shared/amazon_contracts.py, rules: I}
+          - {label: contracts-B, target: packages/shared/amazon_contracts.py, rules: B}
+          - {label: contracts-UP, target: packages/shared/amazon_contracts.py, rules: UP}
+          - {label: contracts-S, target: packages/shared/amazon_contracts.py, rules: S}
+          - {label: contracts-RUF, target: packages/shared/amazon_contracts.py, rules: RUF}
+          - {label: tests-E, target: tests/test_amazon_contract_verification.py, rules: E}
+          - {label: tests-F, target: tests/test_amazon_contract_verification.py, rules: F}
+          - {label: tests-I, target: tests/test_amazon_contract_verification.py, rules: I}
+          - {label: tests-B, target: tests/test_amazon_contract_verification.py, rules: B}
+          - {label: tests-UP, target: tests/test_amazon_contract_verification.py, rules: UP}
+          - {label: tests-S, target: tests/test_amazon_contract_verification.py, rules: S}
+          - {label: tests-RUF, target: tests/test_amazon_contract_verification.py, rules: RUF}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,7 +33,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
-      - run: ruff check .
+      - run: ruff check "${{ matrix.target }}" --select "${{ matrix.rules }}"
 
   pytest-diagnostic:
     name: Pytest diagnostic
