@@ -5,30 +5,16 @@ on:
     branches: [main]
 
 jobs:
-  contracts:
-    name: Ruff contracts file
+  test-rule-isolation:
+    name: current-${{ matrix.rules }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rules: [E, F, I, B, UP, S, RUF]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.11'}
       - run: pip install -e '.[dev]'
-      - run: ruff check packages/shared/amazon_contracts.py
-  tests:
-    name: Ruff contract tests file
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install -e '.[dev]'
-      - run: ruff check tests/test_amazon_contract_verification.py
-  full:
-    name: Ruff full repository
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: '3.11'}
-      - run: pip install -e '.[dev]'
-      - run: ruff check .
+      - run: ruff check tests/test_amazon_contract_verification.py --select "${{ matrix.rules }}"
