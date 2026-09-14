@@ -1,6 +1,31 @@
 version: 2
 
 sources:
+  - name: raw
+    schema: raw
+    description: Raw Amazon landing zone. loaded_at drives deduplication.
+    freshness:
+      warn_after: {count: 36, period: hour}
+      error_after: {count: 72, period: hour}
+    loaded_at_field: loaded_at
+    tables:
+      - name: raw_ads_sp_campaign_daily
+      - name: raw_ads_sp_placement_daily
+      - name: raw_ads_sp_ad_group_daily
+      - name: raw_ads_sp_keyword_daily
+      - name: raw_ads_sp_search_term_daily
+      - name: raw_ads_advertised_product_daily
+      - name: raw_ads_sp_purchased_product_daily
+      - name: raw_ads_negative_keywords
+        freshness: null
+      - name: raw_ads_placement_config
+        freshness: null
+      - name: raw_keepa_product_snapshot
+        freshness: null
+      - name: raw_sqp_query_snapshot
+        freshness: null
+      - name: raw_sales_traffic_asin_daily
+
   - name: app
     schema: public
     tables:
