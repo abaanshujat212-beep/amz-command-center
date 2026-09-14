@@ -1,0 +1,38 @@
+{
+  "keyword:set_bid": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "target:set_bid": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "campaign:set_placement_modifier": {
+    "recommendation_supported": true,
+    "approval_supported": false,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": false,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "*:flag": {
+    "recommendation_supported": true,
+    "approval_supported": false,
+    "live_baseline_read_supported": false,
+    "live_apply_supported": false,
+    "rollback_supported": false,
+    "verification_supported": false,
+    "local_only": true
+  }
+}

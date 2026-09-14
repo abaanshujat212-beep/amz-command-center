@@ -10,7 +10,12 @@ export async function decideAction(input: { tenantId: string; userId: string; ro
 	await withTenant(input.tenantId, async c => {
 		if (isApproval) {
 			const candidate = await query<{ entity_type: string; action_type: string }>(c, "select entity_type, action_type from action where id = $1 and status = 'pending'", [input.actionId])
-			if (candidate.length > 0) { const support = liveActionSupport(candidate[0].entity_type, candidate[0].action_type); if (!support.supported) throw new ApprovalDecisionError(support.message, 409) }
+			if (candidate.length > 0) {
+				const readiness = await query<{ readiness_state: string; verification_level: string | null }>(c, "select readiness_state, metadata->>'verification_level' as verification_level from external_dependency_state where module_key = 'ppc' and dependency_key = 'amazon_ads' order by updated_at desc limit 1")
+				const state = readiness[0]
+				const support = liveActionSupport(candidate[0].entity_type, candidate[0].action_type, state?.readiness_state, state?.verification_level ?? undefined)
+				if (!support.supported) throw new ApprovalDecisionError(support.message, 409)
+			}
 		}
 		const rows = await query<{ id: string; entity_type: string; entity_id: string; action_type: string; before_value: unknown; after_value: unknown; decided_at: string }>(c, `update action set status=$2, decision=$2, decided_by=$3, decided_at=now(), approved_by=case when $4::boolean then $3::uuid else approved_by end, approved_at=case when $4::boolean then now() else approved_at end where id=$1 and status='pending' and expires_at > now() and action_type <> 'flag' returning id, entity_type, entity_id, action_type, before_value, after_value, decided_at::text as decided_at`, [input.actionId,input.decision,input.userId,isApproval])
 		if (rows.length === 0) {
