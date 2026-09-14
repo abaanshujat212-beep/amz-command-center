@@ -26,19 +26,26 @@ jobs:
         working-directory: apps/web
       - name: Capture diagnostics
         shell: bash
+        env:
+          DATABASE_URL_APP: postgresql://axaty_app:axaty_app@localhost:5432/axaty
+          BETTER_AUTH_SECRET: ci-only-secret-at-least-32-characters-long
+          BETTER_AUTH_URL: http://localhost:3000
         run: |
           set +e
           ruff check . > /tmp/ruff.log 2>&1
-          (cd apps/web && npm run typecheck) > /tmp/web.log 2>&1
+          (cd apps/web && npm run typecheck) > /tmp/typecheck.log 2>&1
+          (cd apps/web && npm run build) > /tmp/build.log 2>&1
           {
             echo '=== RUFF ==='
             cat /tmp/ruff.log
             echo '=== WEB TYPECHECK ==='
-            cat /tmp/web.log
+            cat /tmp/typecheck.log
+            echo '=== WEB BUILD ==='
+            cat /tmp/build.log
           } > docs/.ci-149-diagnostics.txt
       - run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add docs/.ci-149-diagnostics.txt
-          git commit -m "ci: record capability diagnostics"
+          git commit -m "ci: record capability build diagnostics"
           git push
