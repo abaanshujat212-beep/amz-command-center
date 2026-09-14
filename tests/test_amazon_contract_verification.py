@@ -10,7 +10,7 @@ from packages.shared.amazon_contracts import (
     validate_method,
     validate_payload,
 )
-from packages.shared.endpoints import Api, ENDPOINTS, REGIONS
+from packages.shared.endpoints import ENDPOINTS, REGIONS, Api
 
 
 def test_all_catalogued_contracts_use_versioned_absolute_paths_and_known_methods():
