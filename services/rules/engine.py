@@ -24,6 +24,7 @@ from services.rules.compiler import (
     render_reason,
     resolve_action,
 )
+from services.rules.freshness import resolve_source_freshness
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 
 
@@ -38,6 +39,7 @@ class RunSummary:
     flagged: int = 0           # diagnostics raised (nothing to approve)
     blocked: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
+    source_freshness: dict = field(default_factory=dict)
 
     def block(self, guard) -> None:
         self.blocked[guard.value] = self.blocked.get(guard.value, 0) + 1
@@ -130,13 +132,27 @@ def evaluate_tenant(
             # keyword -- two unrelated outputs competing for one slot.
             diagnostic = gr.is_diagnostic(action_type)
 
+            settled_cutoff = now.date() - dt.timedelta(days=cfg.settlement_lag_days)
+            freshness = resolve_source_freshness(
+                cur,
+                tenant_id=tenant_id,
+                scope=rule["scope"],
+                now=now,
+                settled_cutoff=settled_cutoff,
+                max_age_hours=cfg.max_data_age_hours,
+            )
+            s.source_freshness[rule["scope"]] = freshness.as_dict()
+            if not freshness.usable:
+                s.blocked[freshness.block_reason] = s.blocked.get(freshness.block_reason, 0) + 1
+                continue
+
             s.rules_run += 1
             rows = fetch_candidates(
                 cur,
                 tenant_id=tenant_id,
                 scope=rule["scope"],
                 lookback_days=rule["lookback_days"],
-                through=through,
+                through=freshness.data_through,
                 where_sql=where_sql,
                 where_params=where_params,
             )
@@ -169,8 +185,8 @@ def evaluate_tenant(
                 )
                 ctx = gr.RunContext(
                     now=now,
-                    data_through=through,
-                    data_loaded_at=now,
+                    data_through=freshness.data_through,
+                    data_loaded_at=freshness.data_loaded_at,
                     changes_applied_today=changes_today,
                     budget_increase_today=budget_today,
                     entities_evaluated=len(rows),
@@ -182,6 +198,7 @@ def evaluate_tenant(
                 )
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
+                metrics["source_freshness"] = freshness.as_dict()
                 reason = render_reason(
                     rule["action_jsonb"].get("reason_template", rule["code"]), metrics
                 )
@@ -197,7 +214,7 @@ def evaluate_tenant(
                         run_id,
                         rule["scope"],
                         key[1],
-                        through,
+                        freshness.data_through,
                         json.dumps(metrics, default=str),
                         json.dumps(
                             {"type": action_type, "value": decision.value},
