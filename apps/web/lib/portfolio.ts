@@ -1,11 +1,12 @@
 import { authPool } from "@/lib/auth"
 import { query, withTenant } from "@/lib/db"
+import { buildPortfolioAttention } from "@/lib/portfolio-attention"
 import { accountTotals, automationState, dataFreshness, openAlerts, pendingActions, tenantIdentity } from "@/lib/queries"
 
 export type Availability = "AVAILABLE" | "NO_DATA" | "STALE" | "BLOCKED" | "WAITING_FOR_AUTHORIZATION" | "EXTERNAL_ACCESS_REQUIRED"
 type Membership = { tenant_id: string; name: string; slug: string; role: string }
 
-type AccountSummary = {
+export type AccountSummary = {
 	tenantId: string
 	name: string
 	slug: string
@@ -18,12 +19,14 @@ type AccountSummary = {
 	sales: number | null
 	spend: number | null
 	acos: number | null
+	targetAcos: number | null
 	pendingApprovals: number
 	openAlerts: number
 	failedActions: number
 	deadLetterActions: number
 	automationEnabled: boolean
 	dryRun: boolean
+	signalObservedAt: { freshness: string | null; approval: string | null; alert: string | null; failed: string | null; deadLetter: string | null }
 	inventory: { state: Availability; value: null }
 	contributionProfit: { state: Availability; value: null }
 }
@@ -36,12 +39,16 @@ async function authorizedTenants(token: string, workspaceId: string, requireAler
 	return rows
 }
 
+function latestTimestamp(values: Array<string | null | undefined>): string | null {
+	return values.filter((value): value is string => Boolean(value)).sort().at(-1) ?? null
+}
+
 async function summarizeTenant(membership: Membership): Promise<AccountSummary> {
 	return withTenant(membership.tenant_id, async client => {
 		const [identity, totals, freshness, approvals, alerts, automation, actionCounts] = await Promise.all([
 			tenantIdentity(client), accountTotals(client), dataFreshness(client), pendingActions(client, 500),
 			openAlerts(client, 500), automationState(client),
-			query<{ failed: number; dead_letter: number }>(client, "select count(*) filter(where status='failed')::int as failed,count(*) filter(where status='dead_letter')::int as dead_letter from action"),
+			query<{ failed: number; dead_letter: number; last_failed_at: string | null; last_dead_letter_at: string | null }>(client, "select count(*) filter(where status='failed')::int as failed,count(*) filter(where status='dead_letter')::int as dead_letter,max(requested_at)::text filter(where status='failed') as last_failed_at,max(requested_at)::text filter(where status='dead_letter') as last_dead_letter_at from action"),
 		])
 		const measured = freshness.filter(item => item.hours_old !== null)
 		const freshnessHours = measured.length ? Math.max(...measured.map(item => item.hours_old as number)) : null
@@ -51,10 +58,17 @@ async function summarizeTenant(membership: Membership): Promise<AccountSummary> 
 			currency: identity?.currency ?? automation?.currency ?? null, marketplace: identity?.country_code ?? null,
 			state, dataThrough: totals?.data_through ?? null, freshnessHours,
 			sales: totals?.data_through ? totals.sales : null, spend: totals?.data_through ? totals.cost : null,
-			acos: totals?.data_through ? totals.acos : null, pendingApprovals: approvals.length,
-			openAlerts: alerts.length, failedActions: actionCounts[0]?.failed ?? 0,
-			deadLetterActions: actionCounts[0]?.dead_letter ?? 0,
+			acos: totals?.data_through ? totals.acos : null, targetAcos: automation?.target_acos_default ?? null,
+			pendingApprovals: approvals.length, openAlerts: alerts.length,
+			failedActions: actionCounts[0]?.failed ?? 0, deadLetterActions: actionCounts[0]?.dead_letter ?? 0,
 			automationEnabled: automation?.automation_enabled ?? false, dryRun: automation?.dry_run ?? true,
+			signalObservedAt: {
+				freshness: latestTimestamp(freshness.map(value => value.last_success)),
+				approval: latestTimestamp(approvals.map(value => value.requested_at)),
+				alert: latestTimestamp(alerts.map(value => value.created_at)),
+				failed: actionCounts[0]?.last_failed_at ?? null,
+				deadLetter: actionCounts[0]?.last_dead_letter_at ?? null,
+			},
 			inventory: { state: "NO_DATA", value: null }, contributionProfit: { state: "NO_DATA", value: null },
 		}
 	})
@@ -75,5 +89,6 @@ export async function portfolioSummary(token: string, workspaceId: string, page:
 		workspaceId, page, pageSize, total: authorized.length, accounts,
 		coverage: { returned: accounts.length, withPerformanceData: accounts.filter(a => a.state !== "NO_DATA").length },
 		aggregates: [...aggregates.values()].map(value => ({ ...value, acos: value.sales > 0 ? value.spend / value.sales : null })),
+		attention: requireAlerts ? buildPortfolioAttention(accounts) : null,
 	}
 }
