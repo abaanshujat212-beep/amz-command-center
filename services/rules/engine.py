@@ -36,8 +36,8 @@ class RunSummary:
     rules_run: int = 0
     entities_evaluated: int = 0
     matched: int = 0
-    proposed: int = 0
-    flagged: int = 0
+    proposed: int = 0          # changes queued for approval
+    flagged: int = 0           # diagnostics raised (nothing to approve)
     blocked: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
     source_freshness: dict = field(default_factory=dict)
@@ -99,6 +99,7 @@ def evaluate_tenant(
             try:
                 where_sql, where_params = compile_condition(rule["condition_jsonb"])
             except RuleValidationError as exc:
+                # A broken rule is disabled, not retried on every run.
                 s.errors.append(f"{rule['code']}: {exc}")
                 cur.execute(
                     "update rule set enabled = false, updated_at = now() where id = %s",
@@ -107,7 +108,12 @@ def evaluate_tenant(
                 continue
 
             action_type = rule["action_jsonb"]["type"]
+            # A diagnostic changes nothing, so it neither respects nor consumes
+            # the one-rule-per-entity claim. Letting it claim would mean a
+            # "low CTR" finding silently cancelling a bid change on the same
+            # keyword -- two unrelated outputs competing for one slot.
             diagnostic = gr.is_diagnostic(action_type)
+
             settled_cutoff = now.date() - dt.timedelta(days=cfg.settlement_lag_days)
             freshness = resolve_source_freshness(
                 cur,
@@ -141,7 +147,7 @@ def evaluate_tenant(
             for row in matched:
                 key = (rule["scope"], row["entity_id"])
                 if not diagnostic and key in claimed:
-                    continue
+                    continue  # a higher-priority rule already owns this entity
 
                 current = row.get("current_value")
                 current = float(current) if current is not None else None
@@ -215,6 +221,10 @@ def evaluate_tenant(
                     s.block(decision.blocked_by)
                     continue
 
+                # Always queued as pending. Dry-run proposals are reviewable but
+                # can never be applied; that check lives in services/actions.
+                # Diagnostics are pending too: pending means "unread" for them,
+                # and 0006 forbids them from ever reaching 'applied'.
                 cur.execute(
                     "insert into action (tenant_id, rule_id, evaluation_id,"
                     " entity_type, entity_id, action_type, before_value,"
@@ -246,6 +256,8 @@ def evaluate_tenant(
                     claimed.add(key)
                     s.proposed += 1
 
+        # Column names must match 0001_tenancy.sql: dataset (not pipeline),
+        # rows_loaded, detail. Getting this wrong rolls back the entire run.
         cur.execute(
             "insert into pipeline_run (tenant_id, dataset, date_to, status,"
             " rows_loaded, finished_at, detail)"
