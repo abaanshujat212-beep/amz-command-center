@@ -26,6 +26,7 @@ from services.rules.compiler import (
 )
 from services.rules.freshness import resolve_source_freshness
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
+from services.rules.settings import load_tenant_guard_config
 
 
 @dataclass
@@ -43,25 +44,6 @@ class RunSummary:
 
     def block(self, guard) -> None:
         self.blocked[guard.value] = self.blocked.get(guard.value, 0) + 1
-
-
-def _settings(cur, tenant_id: str) -> gr.TenantGuardConfig:
-    cur.execute(
-        "select automation_enabled, dry_run, min_bid, max_bid, max_daily_budget,"
-        " max_changes_per_day from tenant_settings where tenant_id = %s",
-        (tenant_id,),
-    )
-    r = cur.fetchone()
-    if r is None:
-        return gr.TenantGuardConfig()  # no settings row = no consent, fail closed
-    return gr.TenantGuardConfig(
-        automation_enabled=r["automation_enabled"],
-        dry_run=r["dry_run"],
-        min_bid=float(r["min_bid"]),
-        max_bid=float(r["max_bid"]),
-        max_daily_budget=float(r["max_daily_budget"]),
-        max_changes_per_day=r["max_changes_per_day"],
-    )
 
 
 def _usage_today(cur, tenant_id: str) -> tuple[int, float]:
@@ -97,7 +79,7 @@ def evaluate_tenant(
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant_id,))
-        cfg = _settings(cur, tenant_id)
+        cfg = load_tenant_guard_config(cur, tenant_id)
         through = through or (now.date() - dt.timedelta(days=cfg.settlement_lag_days))
         changes_today, budget_today = _usage_today(cur, tenant_id)
 
@@ -143,7 +125,9 @@ def evaluate_tenant(
             )
             s.source_freshness[rule["scope"]] = freshness.as_dict()
             if not freshness.usable:
-                s.blocked[freshness.block_reason] = s.blocked.get(freshness.block_reason, 0) + 1
+                s.blocked[freshness.block_reason] = (
+                    s.blocked.get(freshness.block_reason, 0) + 1
+                )
                 continue
 
             s.rules_run += 1
@@ -191,16 +175,23 @@ def evaluate_tenant(
                     budget_increase_today=budget_today,
                     entities_evaluated=len(rows),
                     entities_matched=len(matched),
-                    last_applied_at=_last_applied(cur, tenant_id, rule["scope"], key[1]),
+                    last_applied_at=_last_applied(
+                        cur, tenant_id, rule["scope"], key[1]
+                    ),
                 )
                 decision = gr.check(
-                    proposal, cfg, ctx, rule["min_clicks"], rule["min_impressions"]
+                    proposal,
+                    cfg,
+                    ctx,
+                    rule["min_clicks"],
+                    rule["min_impressions"],
                 )
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
                 reason = render_reason(
-                    rule["action_jsonb"].get("reason_template", rule["code"]), metrics
+                    rule["action_jsonb"].get("reason_template", rule["code"]),
+                    metrics,
                 )
 
                 cur.execute(
