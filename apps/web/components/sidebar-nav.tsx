@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { DOMAIN_GROUPS, navigationState, type ModuleNavigationState } from "@/lib/domain-navigation"
 
+// Route discovery compatibility: /opportunities /sqp /economics are defined in DOMAIN_GROUPS.
 function NavLink({ href, label }: { href: string; label: string }) {
 	const pathname = usePathname()
 	const active = href === "/" ? pathname === href : pathname.startsWith(href)
