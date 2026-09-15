@@ -46,6 +46,7 @@ class ContextEnvelope:
 @dataclass(frozen=True)
 class SourceReference:
     source_id: str
+    tenant_id: str
     provider: str
     observed_at: dt.datetime
     data_through: dt.date | None
@@ -55,8 +56,8 @@ class SourceReference:
     scope: str
 
     def __post_init__(self) -> None:
-        if not self.source_id or not self.provider or not self.scope:
-            raise GroundingError("source id, provider and scope are required")
+        if not self.source_id or not self.tenant_id or not self.provider or not self.scope:
+            raise GroundingError("source id, tenant id, provider and scope are required")
         if self.observed_at.tzinfo is None:
             raise GroundingError("source observed_at must include a timezone")
         if not 0 <= self.completeness <= 1:
@@ -78,6 +79,8 @@ class MetricClaim:
             raise GroundingError("metric key and unit are required")
         if not self.source_ids:
             raise GroundingError(f"numeric claim {self.key!r} has no source")
+        if self.as_of is None:
+            raise GroundingError(f"metric claim {self.key!r} has no as-of date")
 
 
 @dataclass(frozen=True)
@@ -92,9 +95,11 @@ class GroundedResponse:
 
 
 def validate(response: GroundedResponse) -> GroundedResponse:
-    """Fail closed on ungrounded claims, hidden staleness or write-capable tools."""
+    """Fail closed on cross-tenant, ungrounded, stale or write-capable responses."""
     if any(tool not in READ_ONLY_TOOLS for tool in response.tools_used):
         raise GroundingError("AI responses may use read-only allowlisted tools only")
+    if any(source.tenant_id != response.context.tenant_id for source in response.sources):
+        raise GroundingError("source tenant does not match the response context")
     source_by_id = {source.source_id: source for source in response.sources}
     if len(source_by_id) != len(response.sources):
         raise GroundingError("source ids must be unique")
