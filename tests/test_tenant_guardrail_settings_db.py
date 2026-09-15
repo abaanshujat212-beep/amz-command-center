@@ -101,11 +101,16 @@ def test_guardrail_settings_remain_tenant_isolated():
         with psycopg.connect(APP_URL) as conn, conn.transaction():
             conn.execute("select set_tenant(%s)", (tenant_a,))
             assert conn.execute("select count(*) from tenant_settings").fetchone()[0] == 1
-            with pytest.raises(psycopg.errors.Error):
-                conn.execute(
-                    "update tenant_settings set dry_run = false where tenant_id = %s",
-                    (tenant_b,),
-                )
+            result = conn.execute(
+                "update tenant_settings set dry_run = false where tenant_id = %s",
+                (tenant_b,),
+            )
+            assert result.rowcount == 0
+        with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+            assert admin.execute(
+                "select dry_run from tenant_settings where tenant_id = %s",
+                (tenant_b,),
+            ).fetchone()[0]
     finally:
         with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
             admin.execute("delete from tenant where id = any(%s)", ([tenant_a, tenant_b],))
