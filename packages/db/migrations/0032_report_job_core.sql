@@ -97,7 +97,7 @@ end
 $$;
 
 create trigger report_definition_immutable
-before update or delete on report_definition
+before update on report_definition
 for each row execute function protect_report_definition_version();
 
 create function enforce_report_job_transition()
