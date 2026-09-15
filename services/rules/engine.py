@@ -24,6 +24,7 @@ from services.rules.compiler import (
     render_reason,
     resolve_action,
 )
+from services.rules.evidence import build_guardrail_context
 from services.rules.freshness import resolve_source_freshness
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 from services.rules.settings import load_tenant_guard_config
@@ -189,6 +190,13 @@ def evaluate_tenant(
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
+                metrics["guardrail_context"] = build_guardrail_context(
+                    entities_evaluated=len(rows),
+                    entities_matched=len(matched),
+                    min_clicks=rule["min_clicks"],
+                    min_impressions=rule["min_impressions"],
+                    freshness=freshness,
+                )
                 reason = render_reason(
                     rule["action_jsonb"].get("reason_template", rule["code"]),
                     metrics,
