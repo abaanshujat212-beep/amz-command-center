@@ -43,6 +43,7 @@ def _persist(
     job_id: str,
     rendered: RenderedArtifact,
     storage_key: str,
+    created_at: dt.datetime,
     expires_at: dt.datetime,
 ) -> ArtifactRef:
     if not storage_key.strip() or "://" in storage_key:
@@ -51,8 +52,8 @@ def _persist(
         """insert into report_artifact(
                tenant_id,report_job_id,output_format,media_type,file_extension,
                render_contract_version,storage_key,content_sha256,source_data_sha256,
-               byte_size,row_count,reconciliation,expires_at)
-           values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               byte_size,row_count,reconciliation,created_at,expires_at)
+           values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
            returning id,report_job_id,storage_key,content_sha256,media_type,
                      byte_size,row_count,expires_at""",
         (
@@ -68,6 +69,7 @@ def _persist(
             len(rendered.data),
             rendered.row_count,
             Jsonb(rendered.reconciliation),
+            created_at,
             expires_at,
         ),
     ).fetchone()
@@ -125,6 +127,7 @@ def render_claimed_job(
         job_id=job_id,
         rendered=rendered,
         storage_key=storage_key,
+        created_at=now,
         expires_at=now + dt.timedelta(days=retention_days),
     )
     completed = succeed_job(
