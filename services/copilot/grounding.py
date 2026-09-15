@@ -8,9 +8,8 @@ Workspace content is evidence data, never an instruction source.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 ALLOWED_DOMAINS = frozenset(
     {"home", "products", "decisions", "ads", "inventory", "finance", "ai", "reports"}
@@ -62,7 +61,7 @@ class SourceReference:
             raise GroundingError("source observed_at must include a timezone")
         if not 0 <= self.completeness <= 1:
             raise GroundingError("source completeness must be between 0 and 1")
-        if not self.show_data_url.startswith("/"):
+        if not self.show_data_url.startswith("/") or self.show_data_url.startswith("//"):
             raise GroundingError("show-data links must be internal tenant-scoped routes")
 
 
@@ -90,7 +89,6 @@ class GroundedResponse:
     disclosures: tuple[str, ...] = ()
     refusal_reason: str | None = None
     tools_used: tuple[str, ...] = ()
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def validate(response: GroundedResponse) -> GroundedResponse:
@@ -101,14 +99,13 @@ def validate(response: GroundedResponse) -> GroundedResponse:
     if len(source_by_id) != len(response.sources):
         raise GroundingError("source ids must be unique")
     for claim in response.claims:
-        unknown = sorted(set(claim.source_ids) - source_by_id.keys())
+        unknown = sorted(set(claim.source_ids).difference(source_by_id))
         if unknown:
             raise GroundingError(f"claim {claim.key!r} cites unknown sources: {unknown}")
-    risky = {
-        source.freshness
+    risky = any(
+        source.freshness != Freshness.FRESH or source.completeness < 1
         for source in response.sources
-        if source.freshness is not Freshness.FRESH or source.completeness < 1
-    }
+    )
     if risky and not response.disclosures:
         raise GroundingError("stale, partial, missing or blocked evidence must be disclosed")
     if response.claims and not response.sources:
@@ -121,4 +118,4 @@ def validate(response: GroundedResponse) -> GroundedResponse:
 def refusal(context: ContextEnvelope, reason: str) -> GroundedResponse:
     if not reason.strip():
         raise GroundingError("refusal reason is required")
-    return GroundedResponse(context=context, narrative=reason, refusal_reason=reason)
+    return GroundedResponse(context=context, narrative=reason, sources=(), refusal_reason=reason)
