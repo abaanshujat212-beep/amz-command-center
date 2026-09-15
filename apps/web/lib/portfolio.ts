@@ -28,16 +28,12 @@ type AccountSummary = {
 	contributionProfit: { state: Availability; value: null }
 }
 
-async function authorizedTenants(token: string, workspaceId: string): Promise<Membership[]> {
-	const { rows } = await authPool.query<Membership>("select * from public.session_memberships($1)", [token])
-	const checks = await Promise.all(rows.map(async membership => {
-		const authorization = await authPool.query(
-			"select * from public.session_workspace_tenant_authorization($1,$2,$3)",
-			[token, workspaceId, membership.tenant_id],
-		)
-		return authorization.rowCount === 1 ? membership : null
-	}))
-	return checks.filter((row): row is Membership => row !== null)
+async function authorizedTenants(token: string, workspaceId: string, requireAlerts: boolean): Promise<Membership[]> {
+	const { rows } = await authPool.query<Membership>(
+		"select * from public.session_workspace_portfolio_tenants($1,$2,$3)",
+		[token, workspaceId, requireAlerts],
+	)
+	return rows
 }
 
 async function summarizeTenant(membership: Membership): Promise<AccountSummary> {
@@ -64,8 +60,8 @@ async function summarizeTenant(membership: Membership): Promise<AccountSummary> 
 	})
 }
 
-export async function portfolioSummary(token: string, workspaceId: string, page: number, pageSize: number) {
-	const authorized = await authorizedTenants(token, workspaceId)
+export async function portfolioSummary(token: string, workspaceId: string, page: number, pageSize: number, requireAlerts = false) {
+	const authorized = await authorizedTenants(token, workspaceId, requireAlerts)
 	const start = (page - 1) * pageSize
 	const accounts = await Promise.all(authorized.slice(start, start + pageSize).map(summarizeTenant))
 	const aggregates = new Map<string, { currency: string; sales: number; spend: number; accountCount: number }>()

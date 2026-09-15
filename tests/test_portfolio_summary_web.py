@@ -6,10 +6,10 @@ ROUTE = (ROOT / "apps/web/app/api/portfolio/summary/route.ts").read_text()
 
 
 def test_portfolio_authorizes_before_per_tenant_reads():
-    assert "session_memberships($1)" in PORTFOLIO
-    assert "session_workspace_tenant_authorization($1,$2,$3)" in PORTFOLIO
+    assert "session_workspace_portfolio_tenants($1,$2,$3)" in PORTFOLIO
     assert "withTenant(membership.tenant_id" in PORTFOLIO
-    assert "rowCount === 1" in PORTFOLIO
+    assert "requireAlerts" in PORTFOLIO
+    assert "session_workspace_tenant_authorization" not in PORTFOLIO
     assert "set row_security" not in PORTFOLIO.lower()
 
 
