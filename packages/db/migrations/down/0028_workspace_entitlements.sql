@@ -1,0 +1,11 @@
+drop function if exists session_workspaces(text);
+drop trigger if exists workspace_tenant_limit on workspace_tenant;
+drop function if exists enforce_workspace_account_limit();
+drop trigger if exists workspace_member_limit on workspace_member;
+drop function if exists enforce_workspace_seat_limit();
+drop trigger if exists workspace_initialize_entitlement on workspace;
+drop function if exists initialize_workspace_entitlement();
+drop table if exists workspace_tenant;
+drop table if exists workspace_member;
+drop table if exists workspace_entitlement;
+drop table if exists workspace;
