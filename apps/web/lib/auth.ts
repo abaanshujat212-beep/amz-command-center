@@ -15,64 +15,24 @@ export const auth = betterAuth({
 	database: authPool,
 	secret: process.env.BETTER_AUTH_SECRET,
 	baseURL: process.env.BETTER_AUTH_URL,
-	emailAndPassword: {
-		enabled: true,
-		disableSignUp: true,
-	},
-	advanced: {
-		database: {
-			generateId: "uuid",
-		},
-	},
-	user: {
-		modelName: "auth_user",
-		fields: {
-			emailVerified: "email_verified",
-			createdAt: "created_at",
-			updatedAt: "updated_at",
-		},
-	},
+	emailAndPassword: { enabled: true, disableSignUp: true },
+	advanced: { database: { generateId: "uuid" } },
+	user: { modelName: "auth_user", fields: { emailVerified: "email_verified", createdAt: "created_at", updatedAt: "updated_at" } },
 	session: {
 		modelName: "auth_session",
-		fields: {
-			userId: "user_id",
-			expiresAt: "expires_at",
-			ipAddress: "ip_address",
-			userAgent: "user_agent",
-			createdAt: "created_at",
-			updatedAt: "updated_at",
-		},
+		fields: { userId: "user_id", expiresAt: "expires_at", ipAddress: "ip_address", userAgent: "user_agent", createdAt: "created_at", updatedAt: "updated_at" },
 		additionalFields: {
-			activeTenantId: {
-				type: "string",
-				required: false,
-				input: false,
-				fieldName: "active_tenant_id",
-			},
+			activeTenantId: { type: "string", required: false, input: false, fieldName: "active_tenant_id" },
+			activeWorkspaceId: { type: "string", required: false, input: false, fieldName: "active_workspace_id" },
+			activeBrandId: { type: "string", required: false, input: false, fieldName: "active_brand_id" },
+			activeChannelAccountId: { type: "string", required: false, input: false, fieldName: "active_channel_account_id" },
+			activeMarketplaceContextId: { type: "string", required: false, input: false, fieldName: "active_marketplace_context_id" },
+			activeAdsProfileId: { type: "string", required: false, input: false, fieldName: "active_ads_profile_id" },
 		},
 	},
 	account: {
-		modelName: "auth_account",
-		identityStrategy: "provider-id",
-		fields: {
-			userId: "user_id",
-			accountId: "account_id",
-			providerId: "provider_id",
-			accessToken: "access_token",
-			refreshToken: "refresh_token",
-			accessTokenExpiresAt: "access_token_expires_at",
-			refreshTokenExpiresAt: "refresh_token_expires_at",
-			idToken: "id_token",
-			createdAt: "created_at",
-			updatedAt: "updated_at",
-		},
+		modelName: "auth_account", identityStrategy: "provider-id",
+		fields: { userId: "user_id", accountId: "account_id", providerId: "provider_id", accessToken: "access_token", refreshToken: "refresh_token", accessTokenExpiresAt: "access_token_expires_at", refreshTokenExpiresAt: "refresh_token_expires_at", idToken: "id_token", createdAt: "created_at", updatedAt: "updated_at" },
 	},
-	verification: {
-		modelName: "auth_verification",
-		fields: {
-			expiresAt: "expires_at",
-			createdAt: "created_at",
-			updatedAt: "updated_at",
-		},
-	},
+	verification: { modelName: "auth_verification", fields: { expiresAt: "expires_at", createdAt: "created_at", updatedAt: "updated_at" } },
 })
