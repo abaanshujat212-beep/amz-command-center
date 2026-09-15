@@ -53,8 +53,8 @@ def test_internal_event_is_idempotent_and_routes_only_in_app():
                 assert second.created is False
                 assert first.event_id == second.event_id
                 assert first.alert_id == second.alert_id
-                assert app.execute("select count(*) from alert").fetchone()[0] == 1
-                assert app.execute("select count(*) from notification_event").fetchone()[0] == 1
+                assert app.execute("select count(*) as n from alert").fetchone()["n"] == 1
+                assert app.execute("select count(*) as n from notification_event").fetchone()["n"] == 1
                 deliveries = app.execute(
                     """select channel,status,attempt,retry_eligible,cost_amount,alert_id,error
                          from notification_delivery order by channel"""
@@ -76,9 +76,9 @@ def test_internal_event_is_idempotent_and_routes_only_in_app():
                 app.commit()
 
                 app.execute("select set_tenant(%s)", (tenant_b,))
-                assert app.execute("select count(*) from notification_event").fetchone()[0] == 0
-                assert app.execute("select count(*) from notification_delivery").fetchone()[0] == 0
-                assert app.execute("select count(*) from alert").fetchone()[0] == 0
+                assert app.execute("select count(*) as n from notification_event").fetchone()["n"] == 0
+                assert app.execute("select count(*) as n from notification_delivery").fetchone()["n"] == 0
+                assert app.execute("select count(*) as n from alert").fetchone()["n"] == 0
                 app.rollback()
         finally:
             _cleanup(admin, tenant_a)
