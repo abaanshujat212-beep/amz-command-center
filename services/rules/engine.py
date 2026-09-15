@@ -26,6 +26,7 @@ from services.rules.compiler import (
 )
 from services.rules.freshness import resolve_source_freshness
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
+from services.rules.settings import load_tenant_guard_config
 
 
 @dataclass
@@ -35,33 +36,14 @@ class RunSummary:
     rules_run: int = 0
     entities_evaluated: int = 0
     matched: int = 0
-    proposed: int = 0          # changes queued for approval
-    flagged: int = 0           # diagnostics raised (nothing to approve)
+    proposed: int = 0
+    flagged: int = 0
     blocked: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
     source_freshness: dict = field(default_factory=dict)
 
     def block(self, guard) -> None:
         self.blocked[guard.value] = self.blocked.get(guard.value, 0) + 1
-
-
-def _settings(cur, tenant_id: str) -> gr.TenantGuardConfig:
-    cur.execute(
-        "select automation_enabled, dry_run, min_bid, max_bid, max_daily_budget,"
-        " max_changes_per_day from tenant_settings where tenant_id = %s",
-        (tenant_id,),
-    )
-    r = cur.fetchone()
-    if r is None:
-        return gr.TenantGuardConfig()  # no settings row = no consent, fail closed
-    return gr.TenantGuardConfig(
-        automation_enabled=r["automation_enabled"],
-        dry_run=r["dry_run"],
-        min_bid=float(r["min_bid"]),
-        max_bid=float(r["max_bid"]),
-        max_daily_budget=float(r["max_daily_budget"]),
-        max_changes_per_day=r["max_changes_per_day"],
-    )
 
 
 def _usage_today(cur, tenant_id: str) -> tuple[int, float]:
@@ -97,7 +79,7 @@ def evaluate_tenant(
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant_id,))
-        cfg = _settings(cur, tenant_id)
+        cfg = load_tenant_guard_config(cur, tenant_id)
         through = through or (now.date() - dt.timedelta(days=cfg.settlement_lag_days))
         changes_today, budget_today = _usage_today(cur, tenant_id)
 
@@ -117,7 +99,6 @@ def evaluate_tenant(
             try:
                 where_sql, where_params = compile_condition(rule["condition_jsonb"])
             except RuleValidationError as exc:
-                # A broken rule is disabled, not retried on every run.
                 s.errors.append(f"{rule['code']}: {exc}")
                 cur.execute(
                     "update rule set enabled = false, updated_at = now() where id = %s",
@@ -126,12 +107,7 @@ def evaluate_tenant(
                 continue
 
             action_type = rule["action_jsonb"]["type"]
-            # A diagnostic changes nothing, so it neither respects nor consumes
-            # the one-rule-per-entity claim. Letting it claim would mean a
-            # "low CTR" finding silently cancelling a bid change on the same
-            # keyword -- two unrelated outputs competing for one slot.
             diagnostic = gr.is_diagnostic(action_type)
-
             settled_cutoff = now.date() - dt.timedelta(days=cfg.settlement_lag_days)
             freshness = resolve_source_freshness(
                 cur,
@@ -143,7 +119,9 @@ def evaluate_tenant(
             )
             s.source_freshness[rule["scope"]] = freshness.as_dict()
             if not freshness.usable:
-                s.blocked[freshness.block_reason] = s.blocked.get(freshness.block_reason, 0) + 1
+                s.blocked[freshness.block_reason] = (
+                    s.blocked.get(freshness.block_reason, 0) + 1
+                )
                 continue
 
             s.rules_run += 1
@@ -163,7 +141,7 @@ def evaluate_tenant(
             for row in matched:
                 key = (rule["scope"], row["entity_id"])
                 if not diagnostic and key in claimed:
-                    continue  # a higher-priority rule already owns this entity
+                    continue
 
                 current = row.get("current_value")
                 current = float(current) if current is not None else None
@@ -191,16 +169,23 @@ def evaluate_tenant(
                     budget_increase_today=budget_today,
                     entities_evaluated=len(rows),
                     entities_matched=len(matched),
-                    last_applied_at=_last_applied(cur, tenant_id, rule["scope"], key[1]),
+                    last_applied_at=_last_applied(
+                        cur, tenant_id, rule["scope"], key[1]
+                    ),
                 )
                 decision = gr.check(
-                    proposal, cfg, ctx, rule["min_clicks"], rule["min_impressions"]
+                    proposal,
+                    cfg,
+                    ctx,
+                    rule["min_clicks"],
+                    rule["min_impressions"],
                 )
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
                 reason = render_reason(
-                    rule["action_jsonb"].get("reason_template", rule["code"]), metrics
+                    rule["action_jsonb"].get("reason_template", rule["code"]),
+                    metrics,
                 )
 
                 cur.execute(
@@ -230,10 +215,6 @@ def evaluate_tenant(
                     s.block(decision.blocked_by)
                     continue
 
-                # Always queued as pending. Dry-run proposals are reviewable but
-                # can never be applied; that check lives in services/actions.
-                # Diagnostics are pending too: pending means "unread" for them,
-                # and 0006 forbids them from ever reaching 'applied'.
                 cur.execute(
                     "insert into action (tenant_id, rule_id, evaluation_id,"
                     " entity_type, entity_id, action_type, before_value,"
@@ -265,8 +246,6 @@ def evaluate_tenant(
                     claimed.add(key)
                     s.proposed += 1
 
-        # Column names must match 0001_tenancy.sql: dataset (not pipeline),
-        # rows_loaded, detail. Getting this wrong rolls back the entire run.
         cur.execute(
             "insert into pipeline_run (tenant_id, dataset, date_to, status,"
             " rows_loaded, finished_at, detail)"
