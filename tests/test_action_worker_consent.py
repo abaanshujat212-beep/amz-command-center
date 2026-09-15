@@ -65,7 +65,7 @@ class WorkerConn:
         self.committed = True
 
     def rollback(self):
-        raise AssertionError("consent block must not roll back its audit transaction")
+        raise AssertionError("guardrail block must not roll back its audit transaction")
 
 
 def approved_action():
@@ -107,6 +107,11 @@ def wire_run(monkeypatch, conn, actions):
     monkeypatch.setattr(worker, "record_apply_start", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(worker, "persist_apply_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(worker, "persist_action_failure_alert", lambda *_args: False)
+    monkeypatch.setattr(
+        worker,
+        "validate_live_batch",
+        lambda _conn, batch, _cfg, _result, **_kwargs: batch,
+    )
 
 
 def test_changed_settings_block_before_credentials(monkeypatch):
@@ -135,6 +140,34 @@ def test_empty_live_batch_never_loads_credentials(monkeypatch):
     )
     result = worker.run_once("T1", live_ads=True)
     assert (result.scanned, result.failed) == (0, 0)
+    assert conn.committed is True
+
+
+def test_evidence_blocked_batch_never_loads_credentials(monkeypatch):
+    conn = WorkerConn(settings())
+    action = approved_action()
+    wire_run(monkeypatch, conn, [action])
+
+    def block(_conn, batch, _cfg, result, *, now, correlation_key):
+        worker.block_live_actions(
+            _conn,
+            batch,
+            result,
+            now=now,
+            correlation_key=correlation_key,
+            error="missing evidence",
+        )
+        return []
+
+    monkeypatch.setattr(worker, "validate_live_batch", block)
+    monkeypatch.setattr(
+        worker,
+        "load_ads_client",
+        lambda *_args: pytest.fail("blocked batch must not load credentials"),
+    )
+    result = worker.run_once("T1", live_ads=True)
+    assert (result.scanned, result.applied, result.failed) == (1, 0, 1)
+    assert action.error == "guardrail: missing evidence"
     assert conn.committed is True
 
 
