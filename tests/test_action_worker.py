@@ -2,8 +2,7 @@ import datetime as dt
 
 import pytest
 
-from services.actions import state_machine as sm
-from services.actions import worker
+from services.actions import state_machine as sm, worker
 from services.actions.worker import (
     DryRunActionClient,
     WorkerResult,
@@ -237,6 +236,7 @@ def _wire_run(monkeypatch, conn, actions):
     monkeypatch.setattr(worker, "start_worker_run", lambda *_args: "run-1")
     monkeypatch.setattr(worker, "fetch_approved", lambda *_args: actions)
     monkeypatch.setattr(worker, "finish_worker_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(worker, "record_apply_start", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(worker, "persist_apply_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(worker, "persist_action_failure_alert", lambda *_args: False)
 
