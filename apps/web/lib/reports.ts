@@ -137,6 +137,7 @@ export async function createReport(client: PoolClient, tenantId: string, userId:
 		if (!existing[0]) throw new ReportRequestError("idempotencyKey is already bound to another report scope", 409)
 		id = existing[0].id
 	}
+	if (!id) throw new ReportRequestError("report could not be resolved", 500)
 	return getReport(client, tenantId, id)
 }
 

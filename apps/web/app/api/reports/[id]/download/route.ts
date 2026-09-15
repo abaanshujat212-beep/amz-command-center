@@ -13,7 +13,8 @@ export async function GET(_request: Request, { params }: Params) {
 		const { id } = await params
 		const artifact = await withTenant(actor.tenantId, c => authorizedArtifact(c, actor.tenantId, id))
 		const bytes = await readAuthorizedArtifact(artifact)
-		return new NextResponse(bytes, { headers: {
+		const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+		return new NextResponse(body, { headers: {
 			"Cache-Control": "private, no-store",
 			"Content-Disposition": `attachment; filename="report-${id}.${artifact.file_extension}"`,
 			"Content-Length": String(bytes.byteLength),
