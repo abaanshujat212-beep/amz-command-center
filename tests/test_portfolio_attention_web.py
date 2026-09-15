@@ -32,9 +32,11 @@ def test_attention_uses_canonical_signals_and_source_timestamps():
 
 
 def test_attention_routes_are_internal_and_inventory_is_not_invented():
-    assert '"/actions?status=dead_letter"' in ATTENTION
-    assert '"/settings/data"' in ATTENTION
+    assert '"/history"' in ATTENTION
+    assert '"/approvals"' in ATTENTION
     assert '"/campaigns"' in ATTENTION
+    assert '"/alerts"' not in ATTENTION
+    assert '"/actions?' not in ATTENTION
     assert "projected stockout" not in ATTENTION.lower()
     assert 'inventory: { state: "NO_DATA", value: null }' in PORTFOLIO
 
