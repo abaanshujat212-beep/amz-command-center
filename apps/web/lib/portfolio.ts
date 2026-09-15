@@ -48,7 +48,7 @@ async function summarizeTenant(membership: Membership): Promise<AccountSummary> 
 		const [identity, totals, freshness, approvals, alerts, automation, actionCounts] = await Promise.all([
 			tenantIdentity(client), accountTotals(client), dataFreshness(client), pendingActions(client, 500),
 			openAlerts(client, 500), automationState(client),
-			query<{ failed: number; dead_letter: number; last_failed_at: string | null; last_dead_letter_at: string | null }>(client, "select count(*) filter(where status='failed')::int as failed,count(*) filter(where status='dead_letter')::int as dead_letter,max(requested_at)::text filter(where status='failed') as last_failed_at,max(requested_at)::text filter(where status='dead_letter') as last_dead_letter_at from action"),
+			query<{ failed: number; dead_letter: number; last_failed_at: string | null; last_dead_letter_at: string | null }>(client, "select count(*) filter(where status='failed')::int as failed,count(*) filter(where status='dead_letter')::int as dead_letter,(max(requested_at) filter(where status='failed'))::text as last_failed_at,(max(requested_at) filter(where status='dead_letter'))::text as last_dead_letter_at from action"),
 		])
 		const measured = freshness.filter(item => item.hours_old !== null)
 		const freshnessHours = measured.length ? Math.max(...measured.map(item => item.hours_old as number)) : null

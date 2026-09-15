@@ -25,13 +25,13 @@ export function buildPortfolioAttention(accounts: AccountSummary[]) {
 	const deduped = new Map<string, AttentionItem>()
 	for (const account of accounts) {
 		const candidates: AttentionItem[] = []
-		if (account.deadLetterActions > 0) candidates.push(item(account, "CRITICAL", "DEAD_LETTER_ACTIONS", "/actions?status=dead_letter", account.signalObservedAt.deadLetter, account.deadLetterActions))
-		if (account.failedActions > 0) candidates.push(item(account, "CRITICAL", "FAILED_ACTIONS", "/actions?status=failed", account.signalObservedAt.failed, account.failedActions))
-		if (account.openAlerts > 0) candidates.push(item(account, "HIGH", "OPEN_ALERTS", "/alerts", account.signalObservedAt.alert, account.openAlerts))
-		if (account.state === "STALE") candidates.push(item(account, "HIGH", "STALE_DATA", "/settings/data", account.signalObservedAt.freshness))
-		if (account.state === "NO_DATA") candidates.push(item(account, "MEDIUM", "NO_PERFORMANCE_DATA", "/settings/data", account.signalObservedAt.freshness))
+		if (account.deadLetterActions > 0) candidates.push(item(account, "CRITICAL", "DEAD_LETTER_ACTIONS", "/history", account.signalObservedAt.deadLetter, account.deadLetterActions))
+		if (account.failedActions > 0) candidates.push(item(account, "CRITICAL", "FAILED_ACTIONS", "/history", account.signalObservedAt.failed, account.failedActions))
+		if (account.openAlerts > 0) candidates.push(item(account, "HIGH", "OPEN_ALERTS", "/history", account.signalObservedAt.alert, account.openAlerts))
+		if (account.state === "STALE") candidates.push(item(account, "HIGH", "STALE_DATA", "/history", account.signalObservedAt.freshness))
+		if (account.state === "NO_DATA") candidates.push(item(account, "MEDIUM", "NO_PERFORMANCE_DATA", "/history", account.signalObservedAt.freshness))
 		if (account.acos != null && account.targetAcos != null && account.acos > account.targetAcos) candidates.push(item(account, "HIGH", "ACOS_ABOVE_TARGET", "/campaigns", account.dataThrough, null, account.acos, account.targetAcos))
-		if (account.pendingApprovals > 0) candidates.push(item(account, "MEDIUM", "PENDING_APPROVALS", "/actions?status=pending", account.signalObservedAt.approval, account.pendingApprovals))
+		if (account.pendingApprovals > 0) candidates.push(item(account, "MEDIUM", "PENDING_APPROVALS", "/approvals", account.signalObservedAt.approval, account.pendingApprovals))
 		for (const candidate of candidates) deduped.set(`${candidate.tenantId}:${candidate.reason}`, candidate)
 	}
 	const items = [...deduped.values()].sort((left, right) => priority[left.severity] - priority[right.severity] || left.tenantName.localeCompare(right.tenantName) || left.reason.localeCompare(right.reason))
