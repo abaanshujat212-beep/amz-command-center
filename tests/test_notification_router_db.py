@@ -108,11 +108,12 @@ def test_existing_scheduler_alert_is_canonicalized_transactionally():
                 assert event["source_ref"] == "ads_sp_campaign_daily"
                 assert event["event_type"] == "data_stale"
                 assert event["payload"]["scheduler_kind"] == "stale"
-                states = dict(
-                    app.execute(
+                states = {
+                    row["channel"]: row["status"]
+                    for row in app.execute(
                         "select channel,status from notification_delivery"
                     ).fetchall()
-                )
+                }
                 assert states == {
                     "in_app": "DELIVERED",
                     "email": "BLOCKED_CONFIGURATION",
