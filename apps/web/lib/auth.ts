@@ -49,6 +49,36 @@ export const auth = betterAuth({
 				input: false,
 				fieldName: "active_tenant_id",
 			},
+			activeWorkspaceId: {
+				type: "string",
+				required: false,
+				input: false,
+				fieldName: "active_workspace_id",
+			},
+			activeBrandId: {
+				type: "string",
+				required: false,
+				input: false,
+				fieldName: "active_brand_id",
+			},
+			activeChannelAccountId: {
+				type: "string",
+				required: false,
+				input: false,
+				fieldName: "active_channel_account_id",
+			},
+			activeMarketplaceContextId: {
+				type: "string",
+				required: false,
+				input: false,
+				fieldName: "active_marketplace_context_id",
+			},
+			activeAdsProfileId: {
+				type: "string",
+				required: false,
+				input: false,
+				fieldName: "active_ads_profile_id",
+			},
 		},
 	},
 	account: {
