@@ -236,6 +236,7 @@ def _finish(
     target: JobStatus,
     error: str | None,
     now: dt.datetime | None,
+    metadata: dict[str, Any] | None = None,
 ) -> JobRef:
     now = now or dt.datetime.now(dt.timezone.utc)
     row = conn.execute(
@@ -247,6 +248,9 @@ def _finish(
     if row is None:
         raise LookupError("running report job not found for worker and tenant")
     attempt = int(row["attempt"])
+    event_metadata = dict(metadata or {})
+    if error:
+        event_metadata["error"] = error
     _event(
         conn,
         tenant_id=tenant_id,
@@ -258,12 +262,19 @@ def _finish(
         actor_type="worker",
         actor_id=worker_id,
         dedupe_key=f"attempt:{attempt}:{target.value}",
-        metadata={"error": error} if error else None,
+        metadata=event_metadata,
     )
     return JobRef(job_id, target, attempt)
 
 
-def succeed_job(conn, *, tenant_id: str, job_id: str, worker_id: str) -> JobRef:
+def succeed_job(
+    conn,
+    *,
+    tenant_id: str,
+    job_id: str,
+    worker_id: str,
+    metadata: dict[str, Any] | None = None,
+) -> JobRef:
     return _finish(
         conn,
         tenant_id=tenant_id,
@@ -272,6 +283,7 @@ def succeed_job(conn, *, tenant_id: str, job_id: str, worker_id: str) -> JobRef:
         target=JobStatus.SUCCEEDED,
         error=None,
         now=None,
+        metadata=metadata,
     )
 
 
