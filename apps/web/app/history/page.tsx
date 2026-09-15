@@ -2,7 +2,8 @@ import Link from "next/link"
 import { isMoneyAction, shown } from "@/lib/action-value"
 import { withTenant } from "@/lib/db"
 import { money, stamp } from "@/lib/format"
-import { openAlerts, recentPipelineRuns } from "@/lib/queries"
+import { notificationAlerts } from "@/lib/notifications"
+import { recentPipelineRuns } from "@/lib/queries"
 import { actionHistory, historyTotals, type HistoryRow } from "@/lib/queries-drilldown"
 import { ALLOWED_WINDOWS, parseDays, windowHref, type Window } from "@/lib/range"
 import { currentTenantId } from "@/lib/session"
@@ -45,7 +46,7 @@ export default async function History({ searchParams }: { searchParams: Promise<
 	const { rows, totals, alerts, runs } = await withTenant(tenantId, async (c) => ({
 		rows: await actionHistory(c, days, 200),
 		totals: await historyTotals(c, days),
-		alerts: await openAlerts(c, 10),
+		alerts: await notificationAlerts(c, 10),
 		runs: await recentPipelineRuns(c, 12),
 	}))
 	const appliedSpend = totals.filter((t) => t.spend_delta !== null).reduce((sum, t) => sum + Number(t.spend_delta ?? 0), 0)
@@ -54,7 +55,7 @@ export default async function History({ searchParams }: { searchParams: Promise<
 		<section className="grid gap-4 lg:grid-cols-2">
 			<div className="rounded-lg border border-slate-200 bg-white p-4">
 				<div className="mb-3 flex items-center justify-between"><h2 className="font-medium">Open alerts</h2><span className="text-xs text-slate-500">{alerts.length} open</span></div>
-				{alerts.length === 0 ? <p className="text-sm text-slate-500">No open alerts.</p> : <div className="space-y-2">{alerts.map((a) => <div key={a.id} className="rounded border border-slate-100 p-2 text-sm"><div className={`font-medium ${statusTone(a.severity)}`}>{a.severity}: {a.title}</div><div className="text-xs text-slate-500">{a.kind}{a.entity_ref ? ` · ${a.entity_ref}` : ""} · {stamp(a.created_at)}</div></div>)}</div>}
+				{alerts.length === 0 ? <p className="text-sm text-slate-500">No open alerts.</p> : <div className="space-y-2">{alerts.map((a) => <div key={a.id} className="rounded border border-slate-100 p-2 text-sm"><div className={`font-medium ${statusTone(a.severity)}`}>{a.severity}: {a.title}</div><div className="text-xs text-slate-500">{a.kind}{a.entity_ref ? ` · ${a.entity_ref}` : ""} · {stamp(a.created_at)}</div><div className="text-xs text-slate-400">{a.notification_source ? `${a.notification_source} · in-app ${a.in_app_status ?? "not routed"}` : "legacy alert · not routed"}</div></div>)}</div>}
 			</div>
 			<div className="rounded-lg border border-slate-200 bg-white p-4">
 				<div className="mb-3 flex items-center justify-between"><h2 className="font-medium">Recent pipeline runs</h2><span className="text-xs text-slate-500">latest {runs.length}</span></div>
