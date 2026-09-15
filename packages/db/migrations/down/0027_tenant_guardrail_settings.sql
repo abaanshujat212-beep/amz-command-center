@@ -1,0 +1,16 @@
+alter table tenant_settings
+  drop constraint if exists tenant_settings_settlement_lag_days_valid,
+  drop constraint if exists tenant_settings_max_data_age_hours_valid,
+  drop constraint if exists tenant_settings_blast_radius_pct_valid,
+  drop constraint if exists tenant_settings_budget_increase_nonnegative,
+  drop constraint if exists tenant_settings_cooldown_days_valid,
+  drop constraint if exists tenant_settings_max_change_pct_valid,
+  drop constraint if exists tenant_settings_daily_changes_nonnegative,
+  drop constraint if exists tenant_settings_daily_budget_nonnegative,
+  drop constraint if exists tenant_settings_bid_range_valid,
+  drop column if exists settlement_lag_days,
+  drop column if exists max_data_age_hours,
+  drop column if exists blast_radius_pct,
+  drop column if exists max_budget_increase_per_day,
+  drop column if exists cooldown_days,
+  drop column if exists max_change_pct;
