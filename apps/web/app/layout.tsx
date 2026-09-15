@@ -2,9 +2,10 @@ import type { Metadata } from "next"
 import "./globals.css"
 import { withTenant } from "@/lib/db"
 import { automationState, dataFreshness, tenantIdentity } from "@/lib/queries"
-import { currentTenantId } from "@/lib/session"
+import { currentContext, currentTenantId } from "@/lib/session"
 import { AccountMenu } from "@/components/account-menu"
 import { AppShell } from "@/components/app-shell"
+import { ContextSwitcher } from "@/components/context-switcher"
 import { SidebarNav } from "@/components/sidebar-nav"
 
 export const metadata: Metadata = {
@@ -14,6 +15,20 @@ export const metadata: Metadata = {
 
 // Never cache: these pages exist to show the current state of a live account.
 export const dynamic = "force-dynamic"
+
+async function ContextControl() {
+	try {
+		const context = await currentContext()
+		return (
+			<ContextSwitcher
+				currentTenantId={context.tenantId}
+				currentWorkspaceId={context.workspaceId}
+			/>
+		)
+	} catch {
+		return null
+	}
+}
 
 async function StatusBar() {
 	let armed = false
@@ -48,7 +63,8 @@ async function StatusBar() {
 	const stale = stalest !== null && stalest.hours > 48
 
 	return (
-		<div className="flex items-center gap-4 text-xs">
+		<div className="flex flex-wrap items-center gap-4 text-xs">
+			<ContextControl />
 			{tenant && (
 				<div className="hidden text-right sm:block">
 					<div className="font-medium text-slate-800">{tenant.name}</div>
