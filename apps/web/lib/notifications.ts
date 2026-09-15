@@ -23,9 +23,10 @@ export async function notificationAlerts(
 		        a.created_at::text, a.detail, e.source as notification_source,
 		        d.status as in_app_status
 		   from alert a
-		   left join notification_event e on e.id = a.notification_event_id
+		   left join notification_event e
+		     on e.id = a.notification_event_id and e.tenant_id = a.tenant_id
 		   left join notification_delivery d
-		     on d.event_id = e.id and d.channel = 'in_app'
+		     on d.event_id = e.id and d.tenant_id = a.tenant_id and d.channel = 'in_app'
 		  where a.resolved_at is null
 		  order by case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end,
 		           a.created_at desc

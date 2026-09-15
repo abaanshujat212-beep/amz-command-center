@@ -12,6 +12,8 @@ def test_history_reuses_alert_inbox_with_canonical_delivery_metadata():
     assert "from alert a" in NOTIFICATIONS
     assert "notification_event e" in NOTIFICATIONS
     assert "notification_delivery d" in NOTIFICATIONS
+    assert "e.tenant_id = a.tenant_id" in NOTIFICATIONS
+    assert "d.tenant_id = a.tenant_id" in NOTIFICATIONS
     assert "d.channel = 'in_app'" in NOTIFICATIONS
     assert "notificationAlerts(c, 10)" in HISTORY
     assert "legacy alert · not routed" in HISTORY
