@@ -3,7 +3,7 @@ import { auth, authPool } from "@/lib/auth"
 export const dynamic = "force-dynamic"
 
 type Tenant = { tenant_id: string; name: string; slug: string; role: string }
-type Workspace = { workspace_id: string; name: string; slug: string; role: string; can_operate_tenants: boolean; portfolio_enabled: boolean }
+type Workspace = { workspace_id: string; name: string; slug: string; role: string; can_view_portfolio: boolean; can_operate_tenants: boolean; portfolio_enabled: boolean; cross_account_summary_enabled: boolean; portfolio_alerts_enabled: boolean }
 
 export async function GET(request: Request) {
 	const session = await auth.api.getSession({ headers: request.headers })
@@ -15,5 +15,6 @@ export async function GET(request: Request) {
 	return Response.json({
 		tenants: tenants.rows,
 		workspaces: workspaces.rows.filter(w => w.portfolio_enabled && w.can_operate_tenants),
+		portfolioWorkspaces: workspaces.rows.filter(w => w.portfolio_enabled && w.cross_account_summary_enabled && w.can_view_portfolio),
 	})
 }
