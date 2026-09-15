@@ -8,7 +8,7 @@ export const DOMAIN_GROUPS: readonly DomainGroup[] = [
 	{ label: "Products", links: [{ href: "/opportunities", label: "Opportunities" }, { href: "/sqp", label: "SQP opportunities" }] },
 	{ label: "Decisions", links: [{ href: "/approvals", label: "Approvals" }, { href: "/verification", label: "Verification" }, { href: "/history", label: "History" }] },
 	{ label: "Ads / PPC", links: [{ href: "/campaigns", label: "Campaigns" }, { href: "/search-terms", label: "Search terms" }, { href: "/placements", label: "Placements" }] },
-	{ label: "Finance", links: [{ href: "/economics", label: "Economics" }] },
+	{ label: "Finance", links: [{ href: "/economics", label: "Economics" }, { href: "/reports", label: "Reports" }] },
 	{ label: "AI", links: [{ href: "/copilot", label: "Copilot" }] },
 ]
 
