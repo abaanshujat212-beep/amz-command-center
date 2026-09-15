@@ -94,15 +94,23 @@ const REPORT_SELECT = `select j.id,j.definition_code,j.definition_version,j.date
 	from report_job j left join report_artifact a
 		on a.tenant_id=j.tenant_id and a.report_job_id=j.id`
 
+function storageAware(report: ReportView): ReportView {
+	if (report.artifact_state === "AVAILABLE" && !process.env.REPORT_ARTIFACT_ROOT) {
+		return { ...report, artifact_state: "UNAVAILABLE" }
+	}
+	return report
+}
+
 export async function listReports(client: PoolClient, tenantId: string, limit = 100): Promise<ReportView[]> {
-	return query<ReportView>(client, `${REPORT_SELECT} where j.tenant_id=$1 order by j.created_at desc limit $2`, [tenantId, Math.min(200, Math.max(1, limit))])
+	const rows = await query<ReportView>(client, `${REPORT_SELECT} where j.tenant_id=$1 order by j.created_at desc limit $2`, [tenantId, Math.min(200, Math.max(1, limit))])
+	return rows.map(storageAware)
 }
 
 export async function getReport(client: PoolClient, tenantId: string, jobId: string): Promise<ReportView> {
 	if (!UUID.test(jobId)) throw new ReportRequestError("invalid report id")
 	const rows = await query<ReportView>(client, `${REPORT_SELECT} where j.tenant_id=$1 and j.id=$2`, [tenantId, jobId])
 	if (!rows[0]) throw new ReportRequestError("report not found", 404)
-	return rows[0]
+	return storageAware(rows[0])
 }
 
 export async function createReport(client: PoolClient, tenantId: string, userId: string, role: TenantRole, raw: CreateReportInput): Promise<ReportView> {
