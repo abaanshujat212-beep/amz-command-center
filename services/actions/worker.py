@@ -17,6 +17,7 @@ from services.actions import state_machine as sm
 from services.actions.audit import EventType, append_event, event_for, sanitize
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
+from services.rules.settings import GuardrailConfigError, load_tenant_guard_config
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 DATASET = "action_worker"
@@ -209,6 +210,16 @@ def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]
     return row["readiness_state"], row["verification_level"]
 
 
+def require_current_live_consent(conn, tenant_id: str) -> None:
+    """Fail before credentials unless current persisted settings allow live work."""
+    with conn.cursor(row_factory=dict_row) as cur:
+        cfg = load_tenant_guard_config(cur, tenant_id)
+    if not cfg.automation_enabled:
+        raise GuardrailConfigError("automation_enabled is false for this tenant")
+    if cfg.dry_run:
+        raise GuardrailConfigError("dry_run is true for this tenant")
+
+
 def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
     connection_id = getattr(ads, "connection_id", None)
     if connection_id is None:
@@ -377,6 +388,30 @@ def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -
     return sm.apply(action, now=now, live_before_value=live_before, api_ok=True), response
 
 
+def block_live_actions(
+    conn,
+    actions: list[sm.Action],
+    result: WorkerResult,
+    *,
+    now: dt.datetime,
+    correlation_key: str,
+    error: str,
+) -> None:
+    """Persist a consent failure without starting or calling a provider."""
+    for action in actions:
+        failed = sm.apply(
+            action,
+            now=now,
+            live_before_value=action.before_value,
+            api_ok=False,
+            error=f"guardrail: {error}",
+        )
+        persist_apply_result(conn, failed, correlation_key=correlation_key)
+        result.failed += 1
+        if persist_action_failure_alert(conn, failed):
+            result.alerts_created += 1
+
+
 def run_once(
     tenant_id: str,
     *,
@@ -392,6 +427,27 @@ def run_once(
         run_id = start_worker_run(conn, tenant_id)
         ads_client = None
         try:
+            actions = fetch_approved(conn, tenant_id, limit)
+            result.scanned = len(actions)
+            if not actions:
+                finish_worker_run(conn, run_id, result)
+                conn.commit()
+                return result
+            if live_ads:
+                try:
+                    require_current_live_consent(conn, tenant_id)
+                except GuardrailConfigError as exc:
+                    block_live_actions(
+                        conn,
+                        actions,
+                        result,
+                        now=now,
+                        correlation_key=str(run_id),
+                        error=str(exc),
+                    )
+                    finish_worker_run(conn, run_id, result, error=str(exc))
+                    conn.commit()
+                    return result
             if client is None:
                 if live_ads:
                     try:
@@ -406,8 +462,6 @@ def run_once(
                     client = AdsActionClient(ads_client, readiness_state, verification_level)
                 else:
                     client = DryRunActionClient()
-            actions = fetch_approved(conn, tenant_id, limit)
-            result.scanned = len(actions)
             for action in actions:
                 correlation_key = str(run_id)
                 if live_ads:
