@@ -32,6 +32,7 @@ class InternalEvent:
     title: str
     payload: dict = field(default_factory=dict)
     occurred_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
+    recipient_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,8 @@ def _validate(event: InternalEvent) -> None:
                                ("dedupe_key", event.dedupe_key, 256), ("title", event.title, 512)):
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
             raise ValueError(f"invalid {name}")
+    if event.recipient_ref is not None and (not event.recipient_ref.strip() or len(event.recipient_ref) > 256):
+        raise ValueError("invalid recipient_ref")
     if not isinstance(event.payload, dict):
         raise ValueError("notification payload must be an object")
     if len(json.dumps(event.payload, separators=(",", ":"), sort_keys=True).encode()) > MAX_PAYLOAD_BYTES:
@@ -72,7 +75,7 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
             preference, event.occurred_at, event.severity,
             has_consent=False, provider_configured=False,
             conn=conn, tenant_id=event.tenant_id,
-            recipient_ref=None,
+            recipient_ref=event.recipient_ref,
         )
         conn.execute(
             """update notification_delivery
