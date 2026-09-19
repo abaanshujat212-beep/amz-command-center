@@ -59,9 +59,20 @@ begin
 end
 $$;
 
+create function protect_notification_provider_audit() returns trigger
+language plpgsql security invoker set search_path = public, pg_temp as $$
+begin
+  raise exception 'notification provider audit is immutable';
+end
+$$;
+
 create trigger notification_provider_state_audit
 after insert or update on notification_provider_state
 for each row execute function audit_notification_provider_state();
+
+create trigger notification_provider_state_audit_immutable
+before update or delete on notification_provider_state_audit
+for each row execute function protect_notification_provider_audit();
 
 alter table notification_provider_state enable row level security;
 alter table notification_provider_state force row level security;
