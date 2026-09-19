@@ -52,7 +52,7 @@ def test_consent_history_is_immutable_and_contact_data_is_not_consent():
                      values(%s,'email-address','email','operational_alert','granted',now())
                      returning id""", (tenant_id,),
             ).fetchone()
-            with pytest.raises(psycopg.errors.RaiseException):
+            with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
                 admin.execute("update notification_consent_event set decision='revoked' where id=%s", (row[0],))
         finally:
             admin.execute("delete from tenant where id=%s", (tenant_id,))
