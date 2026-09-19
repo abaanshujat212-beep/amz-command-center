@@ -57,12 +57,25 @@ as $$
   ), false)
 $$;
 
+create view notification_consent_effective_state as
+select distinct on (tenant_id, recipient_ref, channel, purpose)
+       tenant_id, recipient_ref, channel, purpose,
+       decision = 'granted' as consented,
+       occurred_at, created_at
+  from notification_consent_event
+ order by tenant_id, recipient_ref, channel, purpose, occurred_at desc, created_at desc, id desc;
+
 alter table notification_consent_event enable row level security;
 alter table notification_consent_event force row level security;
 create policy tenant_isolation on notification_consent_event
   using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
-revoke all on notification_consent_event from axaty_app;
+alter view notification_consent_effective_state enable row level security;
+create policy tenant_isolation on notification_consent_effective_state
+  using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+
+revoke all on notification_consent_event, notification_consent_effective_state from axaty_app;
 grant select, insert on notification_consent_event to axaty_app;
+grant select on notification_consent_effective_state to axaty_app;
 grant execute on function notification_consent_effective(uuid, text, text, text) to axaty_app;
