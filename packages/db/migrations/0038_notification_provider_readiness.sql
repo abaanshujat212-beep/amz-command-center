@@ -48,6 +48,7 @@ create index idx_notification_provider_audit_tenant_time on notification_provide
 create function audit_notification_provider_state() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$
 begin
+  perform set_config('app.tenant_id', new.tenant_id::text, true);
   insert into notification_provider_state_audit (
     tenant_id, provider_state_id, channel, readiness_state, config_ref,
     credential_ref, verification_ref, readiness_reason, actor_user_id
