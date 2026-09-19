@@ -30,7 +30,7 @@ end
 $$;
 
 create trigger notification_consent_event_immutable
-before update or delete on notification_consent_event
+before update on notification_consent_event
 for each row execute function protect_notification_consent_event();
 
 create function notification_consent_effective(
