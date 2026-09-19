@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 
 from psycopg.types.json import Jsonb
 
+from services.notifications.policy import evaluate_delivery_policy, load_preference
+
 ALLOWED_EVENT_TYPES = frozenset(
     {
         "auth_expiring",
@@ -83,12 +85,33 @@ def _cell(row, name: str, index: int = 0):
     return row[index]
 
 
-def publish_in_app(conn, event: InternalEvent) -> PublishResult:
-    """Publish once and let the alert trigger record all channel outcomes.
+def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
+    """Persist policy outcomes; this function never performs external delivery."""
+    for channel in ("in_app", "email", "whatsapp", "sms"):
+        preference = load_preference(conn, event.tenant_id, event.event_type, channel)
+        decision = evaluate_delivery_policy(
+            preference,
+            event.occurred_at,
+            event.severity,
+            has_consent=False,
+            provider_configured=False,
+        )
+        conn.execute(
+            """
+            update notification_delivery
+               set policy_decision=%s, eligible_at=%s, updated_at=now()
+             where tenant_id=%s and event_id=%s and channel=%s
+            """,
+            (decision.status, decision.eligible_at, event.tenant_id, event_id, channel),
+        )
 
-    The caller owns the surrounding transaction. The alert row, immutable event,
-    in-app delivery and blocked external-channel states therefore commit or roll
-    back together.
+
+def publish_in_app(conn, event: InternalEvent) -> PublishResult:
+    """Publish once and apply persisted policy to the canonical delivery rows.
+
+    The caller owns the surrounding transaction. No provider or network call is
+    made; external channels remain blocked because consent and readiness are not
+    available in this slice.
     """
     _validate(event)
     detail = {
@@ -126,8 +149,10 @@ def publish_in_app(conn, event: InternalEvent) -> PublishResult:
     ).fetchone()
     if row is None or _cell(row, "notification_event_id", 1) is None:
         raise RuntimeError("notification event routing did not complete")
+    event_id = str(_cell(row, "notification_event_id", 1))
+    _wire_policy_decisions(conn, event, event_id)
     return PublishResult(
-        event_id=str(_cell(row, "notification_event_id", 1)),
+        event_id=event_id,
         alert_id=str(_cell(row, "id")),
         created=created,
     )

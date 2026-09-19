@@ -28,7 +28,7 @@ def _cleanup(admin, tenant_id):
     admin.commit()
 
 
-def test_internal_event_is_idempotent_and_routes_only_in_app():
+def test_internal_event_is_idempotent_and_applies_policy_decisions():
     tenant_a, tenant_b = uuid.uuid4(), uuid.uuid4()
     with psycopg.connect(ADMIN_URL) as admin:
         _seed(admin, tenant_a)
@@ -56,18 +56,23 @@ def test_internal_event_is_idempotent_and_routes_only_in_app():
                 assert app.execute("select count(*) as n from alert").fetchone()["n"] == 1
                 assert app.execute("select count(*) as n from notification_event").fetchone()["n"] == 1
                 deliveries = app.execute(
-                    """select channel,status,attempt,retry_eligible,cost_amount,alert_id,error
+                    """select channel,status,policy_decision,eligible_at,attempt,
+                              retry_eligible,cost_amount,alert_id,error
                          from notification_delivery order by channel"""
                 ).fetchall()
                 assert len(deliveries) == 4
                 in_app = next(row for row in deliveries if row["channel"] == "in_app")
                 assert in_app["status"] == "DELIVERED"
+                assert in_app["policy_decision"] == "IMMEDIATE"
+                assert in_app["eligible_at"] is None
                 assert in_app["attempt"] == 1
                 assert in_app["alert_id"] is not None
                 assert in_app["cost_amount"] == 0
                 for row in deliveries:
                     if row["channel"] != "in_app":
                         assert row["status"] == "BLOCKED_CONFIGURATION"
+                        assert row["policy_decision"] == "BLOCKED_DISABLED"
+                        assert row["eligible_at"] is None
                         assert row["attempt"] == 0
                         assert row["retry_eligible"] is False
                         assert row["alert_id"] is None
@@ -83,6 +88,48 @@ def test_internal_event_is_idempotent_and_routes_only_in_app():
         finally:
             _cleanup(admin, tenant_a)
             _cleanup(admin, tenant_b)
+
+
+def test_policy_wiring_honors_wildcard_digest_preference_without_delivery():
+    tenant_id = uuid.uuid4()
+    with psycopg.connect(ADMIN_URL) as admin:
+        _seed(admin, tenant_id)
+        try:
+            with psycopg.connect(APP_URL, row_factory=dict_row) as app:
+                app.execute("select set_tenant(%s)", (tenant_id,))
+                app.execute(
+                    """insert into notification_route_preference
+                         (tenant_id,event_type,channel,enabled,delivery_mode,
+                          digest_interval_minutes,timezone)
+                         values(%s,'*','email',true,'digest',1440,'UTC')""",
+                    (tenant_id,),
+                )
+                event = InternalEvent(
+                    tenant_id=str(tenant_id),
+                    event_type="data_stale",
+                    source="scheduler",
+                    source_ref="ads_sp_campaign_daily",
+                    dedupe_key="stale:ads_sp_campaign_daily",
+                    severity="warning",
+                    title="Dataset is stale",
+                    payload={"dataset": "ads_sp_campaign_daily"},
+                    occurred_at=dt.datetime(2026, 9, 19, 12, tzinfo=dt.timezone.utc),
+                )
+                publish_in_app(app, event)
+                rows = {
+                    row["channel"]: row
+                    for row in app.execute(
+                        "select channel,status,policy_decision,eligible_at"
+                        " from notification_delivery"
+                    ).fetchall()
+                }
+                assert rows["in_app"]["policy_decision"] == "IMMEDIATE"
+                assert rows["email"]["status"] == "BLOCKED_CONFIGURATION"
+                assert rows["email"]["policy_decision"] == "BLOCKED_CONSENT"
+                assert rows["email"]["eligible_at"] is None
+                app.rollback()
+        finally:
+            _cleanup(admin, tenant_id)
 
 
 def test_existing_scheduler_alert_is_canonicalized_transactionally():
