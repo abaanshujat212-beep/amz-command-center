@@ -2,8 +2,8 @@ import datetime as dt
 
 from services.notifications.consent import load_effective_consent
 from services.notifications.policy import (
-    BLOCKED_CONSENT,
     BLOCKED_CONFIGURATION,
+    BLOCKED_CONSENT,
     ELIGIBLE,
     RoutePreference,
     evaluate_delivery_policy,
