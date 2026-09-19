@@ -85,7 +85,7 @@ def _cell(row, name: str, index: int = 0):
     return row[index]
 
 
-def _wire_policy_decisions(conn, event: InternalEvent) -> None:
+def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
     """Persist policy outcomes; this function never performs external delivery."""
     for channel in ("in_app", "email", "whatsapp", "sms"):
         preference = load_preference(conn, event.tenant_id, event.event_type, channel)
