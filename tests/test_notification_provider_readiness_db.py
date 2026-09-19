@@ -55,7 +55,10 @@ def test_ready_requires_verification_evidence_and_audit_is_append_only():
                      (tenant_id,channel,readiness_state,verification_ref,evidence_observed_at)
                      values(%s,'sms','READY','verification-1',now()) returning id""", (tenant_id,),
             ).fetchone()
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                admin.execute("delete from notification_provider_state_audit where provider_state_id=%s", (row[0],))
+            with psycopg.connect(APP_URL) as app:
+                app.execute("select set_tenant(%s)", (tenant_id,))
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    app.execute("delete from notification_provider_state_audit where provider_state_id=%s", (row[0],))
+                app.rollback()
         finally:
             admin.execute("delete from tenant where id=%s", (tenant_id,))
