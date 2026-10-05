@@ -17,6 +17,7 @@ create table notification_provider_state (
   actor_user_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  unique (id, tenant_id),
   unique (tenant_id, channel),
   check (readiness_state <> 'READY' or (verification_ref is not null and evidence_observed_at is not null)),
   check (evidence_expires_at is null or evidence_observed_at is null or evidence_expires_at > evidence_observed_at),
