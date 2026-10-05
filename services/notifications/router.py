@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from psycopg.types.json import Jsonb
 
 from services.notifications.policy import evaluate_delivery_policy, load_preference
+from services.notifications.provider_readiness import load_provider_ready
 
 ALLOWED_EVENT_TYPES = frozenset({
     "auth_expiring", "auth_expired", "pipeline_failed", "data_stale",
@@ -73,7 +74,8 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
         preference = load_preference(conn, event.tenant_id, event.event_type, channel)
         decision = evaluate_delivery_policy(
             preference, event.occurred_at, event.severity,
-            has_consent=False, provider_configured=False,
+            has_consent=False,
+            provider_configured=load_provider_ready(conn, event.tenant_id, channel),
             conn=conn, tenant_id=event.tenant_id,
             recipient_ref=event.recipient_ref,
         )
@@ -86,7 +88,7 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
 
 
 def publish_in_app(conn, event: InternalEvent) -> PublishResult:
-    """Publish once and apply canonical preference/consent policy."""
+    """Publish once and apply canonical preference, consent, and readiness policy."""
     _validate(event)
     detail = {"notification_source": event.source, "notification_source_ref": event.source_ref,
               "event_payload": event.payload}
