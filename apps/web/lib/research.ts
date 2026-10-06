@@ -17,6 +17,12 @@ export type ResearchCandidateView = QueryResultRow & {
 	observation_count: number; complete_count: number; partial_count: number; blocked_count: number
 	latest_observed_at: string | null
 }
+export type OpportunityFeedView = QueryResultRow & {
+	run_id: string; project_name: string; scheduled_for: string; status: string
+	reason: string | null; candidate_id: string | null; title: string | null
+	rank: number | null; score: number | null; provider: string | null
+	observed_at: string | null; completeness: string | null
+}
 
 function text(value: unknown, name: string, limit: number) {
 	if (typeof value !== "string" || !value.trim() || value.trim().length > limit) throw new ResearchInputError(`${name} is required`)
@@ -33,6 +39,17 @@ export async function listResearchCandidates(client: PoolClient, tenantId: strin
 	from research_candidate c join research_project p on p.id=c.project_id and p.tenant_id=c.tenant_id
 	left join research_observation o on o.candidate_id=c.id and o.tenant_id=c.tenant_id
 	where c.tenant_id=$1 group by c.id,p.name order by c.updated_at desc`, [tenantId])
+}
+
+export async function listOpportunityFeed(client: PoolClient, tenantId: string) {
+	return query<OpportunityFeedView>(client, `select r.id as run_id,p.name as project_name,r.scheduled_for::text,r.status,r.reason,
+		c.id as candidate_id,c.title,i.rank,i.score,o.provider,o.observed_at::text,o.completeness
+	from opportunity_feed_run r join opportunity_feed_schedule s on s.id=r.schedule_id and s.tenant_id=r.tenant_id
+	join research_project p on p.id=s.project_id and p.tenant_id=s.tenant_id
+	left join opportunity_feed_item i on i.run_id=r.id and i.tenant_id=r.tenant_id
+	left join research_candidate c on c.id=i.candidate_id and c.tenant_id=i.tenant_id
+	left join research_observation o on o.id=i.score_observation_id and o.tenant_id=i.tenant_id
+	where r.tenant_id=$1 order by r.scheduled_for desc,i.rank nulls last limit 200`, [tenantId])
 }
 
 export async function createResearchProject(client: PoolClient, tenantId: string, userId: string, role: TenantRole, raw: Record<string, unknown>) {

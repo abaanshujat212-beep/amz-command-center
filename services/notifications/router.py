@@ -28,6 +28,7 @@ ALLOWED_EVENT_TYPES = frozenset(
         "excess_stock",
         "unusual_demand",
         "report_ready",
+        "product_opportunity_digest",
     }
 )
 ALLOWED_SOURCES = frozenset(
@@ -106,7 +107,7 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
             tenant_id=event.tenant_id,
             recipient_ref=event.recipient_ref,
             purpose="report_delivery"
-            if event.event_type == "report_ready"
+            if event.event_type in {"report_ready", "product_opportunity_digest"}
             else "operational_alert",
         )
         conn.execute(

@@ -56,3 +56,13 @@ def test_report_ready_is_a_canonical_internal_event():
         dedupe_key="report-ready:run-1",
     )
     assert report.event_type == "report_ready"
+
+
+def test_product_opportunity_digest_is_a_canonical_internal_event():
+    digest = event(
+        event_type="product_opportunity_digest",
+        source="internal",
+        source_ref="feed-run-1",
+        dedupe_key="opportunity-feed:run-1",
+    )
+    assert digest.event_type == "product_opportunity_digest"
