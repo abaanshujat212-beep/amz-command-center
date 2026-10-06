@@ -46,25 +46,48 @@ def test_missing_recipient_or_invalid_scope_fails_closed():
 def test_policy_reads_canonical_effective_consent():
     conn = ConsentConnection(True)
     decision = evaluate_delivery_policy(
-        external(), NOW, "warning", conn=conn, tenant_id="tenant-1", recipient_ref="recipient-1",
+        external(),
+        NOW,
+        "warning",
+        conn=conn,
+        tenant_id="tenant-1",
+        recipient_ref="recipient-1",
         provider_configured=True,
     )
     assert decision.status == ELIGIBLE
     assert conn.parameters == ("tenant-1", "recipient-1", "email", "operational_alert")
 
 
+def test_report_delivery_has_separate_consent_purpose():
+    conn = ConsentConnection(True)
+    assert (
+        load_effective_consent(conn, "tenant-1", "recipient-1", "email", "report_delivery") is True
+    )
+    assert conn.parameters == ("tenant-1", "recipient-1", "email", "report_delivery")
+
+
 def test_revoked_or_missing_effective_consent_blocks_before_provider_gate():
     for consent in (False, None):
         decision = evaluate_delivery_policy(
-            external(), NOW, "warning", conn=ConsentConnection(consent),
-            tenant_id="tenant-1", recipient_ref="recipient-1", provider_configured=True,
+            external(),
+            NOW,
+            "warning",
+            conn=ConsentConnection(consent),
+            tenant_id="tenant-1",
+            recipient_ref="recipient-1",
+            provider_configured=True,
         )
         assert decision.status == BLOCKED_CONSENT
 
 
 def test_consent_does_not_make_provider_ready():
     decision = evaluate_delivery_policy(
-        external(), NOW, "warning", conn=ConsentConnection(True),
-        tenant_id="tenant-1", recipient_ref="recipient-1", provider_configured=False,
+        external(),
+        NOW,
+        "warning",
+        conn=ConsentConnection(True),
+        tenant_id="tenant-1",
+        recipient_ref="recipient-1",
+        provider_configured=False,
     )
     assert decision.status == BLOCKED_CONFIGURATION
