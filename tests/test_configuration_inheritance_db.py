@@ -117,6 +117,8 @@ def test_version_precedence_detach_rollback_rbac_hard_guards_and_rls():
                             where scope_type='entity' and scope_id='campaign:c1'"""
                 ).fetchone()["array_agg"] == ["apply", "detach", "rollback"]
                 app.commit()
+                # Tenant context is transaction-local; restore it after commit.
+                app.execute("select set_tenant(%s)", (tenant_a,))
                 with pytest.raises(PermissionError):
                     publish_override(
                         app,
