@@ -25,6 +25,7 @@ ALLOWED_EVENT_TYPES = frozenset(
         "excess_stock",
         "unusual_demand",
         "report_ready",
+        "product_opportunity_digest",
     }
 )
 ALLOWED_SEVERITIES = frozenset({"info", "warning", "critical"})
