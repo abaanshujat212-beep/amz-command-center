@@ -13,6 +13,7 @@ PAGE = (ROOT / "apps/web/app/research/page.tsx").read_text(encoding="utf-8")
 def test_feed_is_idempotent_tenant_scoped_and_reversible():
     assert UP.startswith("-- 0041_product_opportunity_feed.sql")
     assert "unique (tenant_id, schedule_id, scheduled_for)" in UP
+    assert "uq_research_observation_id_tenant unique (id, tenant_id)" in UP
     assert "force row level security" in UP
     for table in ("opportunity_feed_item", "opportunity_feed_run", "opportunity_feed_schedule"):
         assert f"drop table if exists {table}" in DOWN

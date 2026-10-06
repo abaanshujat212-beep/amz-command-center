@@ -1,6 +1,9 @@
 -- 0041_product_opportunity_feed.sql
 -- Evidence-grounded scheduled research feeds; no provider or scraping adapter.
 
+alter table research_observation
+  add constraint uq_research_observation_id_tenant unique (id, tenant_id);
+
 alter table alert drop constraint alert_kind_check;
 alter table alert add constraint alert_kind_check check (kind in (
   'auth_expiring','auth_expired','pipeline_failed','data_stale','blast_radius_halt',

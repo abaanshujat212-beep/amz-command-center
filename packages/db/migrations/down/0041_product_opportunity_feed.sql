@@ -1,6 +1,7 @@
 drop table if exists opportunity_feed_item;
 drop table if exists opportunity_feed_run;
 drop table if exists opportunity_feed_schedule;
+alter table research_observation drop constraint if exists uq_research_observation_id_tenant;
 alter table notification_route_preference drop constraint if exists notification_route_preference_event_type_check;
 alter table notification_route_preference add constraint notification_route_preference_event_type_check check (event_type in ('*','auth_expiring','auth_expired','pipeline_failed','data_stale','blast_radius_halt','budget_guard','action_failed','economics_incomplete','low_inventory','projected_stockout','reorder_due','inbound_delayed','excess_stock','unusual_demand','report_ready'));
 alter table notification_event drop constraint if exists notification_event_event_type_check;
