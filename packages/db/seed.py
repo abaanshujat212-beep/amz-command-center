@@ -38,11 +38,10 @@ import uuid
 import psycopg
 from psycopg.rows import dict_row
 
+from services.config.strategy_catalog import seed_templates
 from services.rules.rule_catalog import all_rule_rows
 
-ADMIN_URL = os.environ.get(
-    "DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty"
-)
+ADMIN_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 
 # Stable namespace so `make seed` produces the same ids on every machine and
 # tests can hard-code the fixture tenants without reading the database first.
@@ -114,10 +113,15 @@ def seed_tenant(conn, name: str, slug: str) -> uuid.UUID:
             if row["action_jsonb"].get("type") == "flag":
                 flags += 1
 
+        objectives, strategies = seed_templates(conn, str(tenant_id))
+
     # Commit per tenant. This also clears app.tenant_id, which is why
     # set_tenant() is called again at the top of the next tenant.
     conn.commit()
-    print(f"  {slug:<10} {tenant_id}  {rules} rules ({flags} diagnostic)")
+    print(
+        f"  {slug:<10} {tenant_id}  {rules} rules ({flags} diagnostic), "
+        f"{objectives} objective and {strategies} strategy templates created"
+    )
     return tenant_id
 
 
