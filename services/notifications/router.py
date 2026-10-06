@@ -11,13 +11,28 @@ from psycopg.types.json import Jsonb
 from services.notifications.policy import evaluate_delivery_policy, load_preference
 from services.notifications.provider_readiness import load_provider_ready
 
-ALLOWED_EVENT_TYPES = frozenset({
-    "auth_expiring", "auth_expired", "pipeline_failed", "data_stale",
-    "blast_radius_halt", "budget_guard", "action_failed", "economics_incomplete",
-    "low_inventory", "projected_stockout", "reorder_due", "inbound_delayed",
-    "excess_stock", "unusual_demand",
-})
-ALLOWED_SOURCES = frozenset({"scheduler", "action_worker", "inventory_engine", "internal"})
+ALLOWED_EVENT_TYPES = frozenset(
+    {
+        "auth_expiring",
+        "auth_expired",
+        "pipeline_failed",
+        "data_stale",
+        "blast_radius_halt",
+        "budget_guard",
+        "action_failed",
+        "economics_incomplete",
+        "low_inventory",
+        "projected_stockout",
+        "reorder_due",
+        "inbound_delayed",
+        "excess_stock",
+        "unusual_demand",
+        "report_ready",
+    }
+)
+ALLOWED_SOURCES = frozenset(
+    {"scheduler", "action_worker", "inventory_engine", "internal", "report_worker"}
+)
 ALLOWED_SEVERITIES = frozenset({"info", "warning", "critical"})
 MAX_PAYLOAD_BYTES = 32_768
 
@@ -50,15 +65,24 @@ def _validate(event: InternalEvent) -> None:
         raise ValueError("unsupported internal event source")
     if event.severity not in ALLOWED_SEVERITIES:
         raise ValueError("unsupported notification severity")
-    for name, value, limit in (("tenant_id", event.tenant_id, 128), ("source_ref", event.source_ref, 256),
-                               ("dedupe_key", event.dedupe_key, 256), ("title", event.title, 512)):
+    for name, value, limit in (
+        ("tenant_id", event.tenant_id, 128),
+        ("source_ref", event.source_ref, 256),
+        ("dedupe_key", event.dedupe_key, 256),
+        ("title", event.title, 512),
+    ):
         if not isinstance(value, str) or not value.strip() or len(value) > limit:
             raise ValueError(f"invalid {name}")
-    if event.recipient_ref is not None and (not event.recipient_ref.strip() or len(event.recipient_ref) > 256):
+    if event.recipient_ref is not None and (
+        not event.recipient_ref.strip() or len(event.recipient_ref) > 256
+    ):
         raise ValueError("invalid recipient_ref")
     if not isinstance(event.payload, dict):
         raise ValueError("notification payload must be an object")
-    if len(json.dumps(event.payload, separators=(",", ":"), sort_keys=True).encode()) > MAX_PAYLOAD_BYTES:
+    if (
+        len(json.dumps(event.payload, separators=(",", ":"), sort_keys=True).encode())
+        > MAX_PAYLOAD_BYTES
+    ):
         raise ValueError("notification payload is too large")
     if event.occurred_at.tzinfo is None or event.occurred_at.utcoffset() is None:
         raise ValueError("occurred_at must be timezone-aware")
@@ -73,11 +97,17 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
     for channel in ("in_app", "email", "whatsapp", "sms"):
         preference = load_preference(conn, event.tenant_id, event.event_type, channel)
         decision = evaluate_delivery_policy(
-            preference, event.occurred_at, event.severity,
+            preference,
+            event.occurred_at,
+            event.severity,
             has_consent=False,
             provider_configured=load_provider_ready(conn, event.tenant_id, channel),
-            conn=conn, tenant_id=event.tenant_id,
+            conn=conn,
+            tenant_id=event.tenant_id,
             recipient_ref=event.recipient_ref,
+            purpose="report_delivery"
+            if event.event_type == "report_ready"
+            else "operational_alert",
         )
         conn.execute(
             """update notification_delivery
@@ -90,15 +120,26 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
 def publish_in_app(conn, event: InternalEvent) -> PublishResult:
     """Publish once and apply canonical preference, consent, and readiness policy."""
     _validate(event)
-    detail = {"notification_source": event.source, "notification_source_ref": event.source_ref,
-              "event_payload": event.payload}
+    detail = {
+        "notification_source": event.source,
+        "notification_source_ref": event.source_ref,
+        "event_payload": event.payload,
+    }
     inserted = conn.execute(
         """insert into alert (tenant_id,kind,severity,title,detail,entity_ref,dedupe_key,created_at)
            values (%s,%s,%s,%s,%s,%s,%s,%s)
            on conflict (tenant_id,dedupe_key) where dedupe_key is not null do nothing
            returning id::text""",
-        (event.tenant_id, event.event_type, event.severity, event.title, Jsonb(detail),
-         event.source_ref, event.dedupe_key, event.occurred_at),
+        (
+            event.tenant_id,
+            event.event_type,
+            event.severity,
+            event.title,
+            Jsonb(detail),
+            event.source_ref,
+            event.dedupe_key,
+            event.occurred_at,
+        ),
     ).fetchone()
     created = inserted is not None
     row = conn.execute(

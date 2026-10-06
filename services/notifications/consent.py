@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 ALLOWED_CONSENT_CHANNELS = frozenset({"email", "whatsapp", "sms"})
-ALLOWED_CONSENT_PURPOSES = frozenset({"operational_alert"})
+ALLOWED_CONSENT_PURPOSES = frozenset({"operational_alert", "report_delivery"})
 
 
 def load_effective_consent(

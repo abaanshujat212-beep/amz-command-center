@@ -8,12 +8,25 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from services.notifications.consent import load_effective_consent
 
-ALLOWED_EVENT_TYPES = frozenset({
-    "auth_expiring", "auth_expired", "pipeline_failed", "data_stale",
-    "blast_radius_halt", "budget_guard", "action_failed", "economics_incomplete",
-    "low_inventory", "projected_stockout", "reorder_due", "inbound_delayed",
-    "excess_stock", "unusual_demand",
-})
+ALLOWED_EVENT_TYPES = frozenset(
+    {
+        "auth_expiring",
+        "auth_expired",
+        "pipeline_failed",
+        "data_stale",
+        "blast_radius_halt",
+        "budget_guard",
+        "action_failed",
+        "economics_incomplete",
+        "low_inventory",
+        "projected_stockout",
+        "reorder_due",
+        "inbound_delayed",
+        "excess_stock",
+        "unusual_demand",
+        "report_ready",
+    }
+)
 ALLOWED_SEVERITIES = frozenset({"info", "warning", "critical"})
 ALLOWED_CHANNELS = frozenset({"in_app", "email", "whatsapp", "sms"})
 ALLOWED_MODES = frozenset({"immediate", "digest"})
@@ -64,8 +77,10 @@ def _validate(preference: RoutePreference) -> ZoneInfo:
     elif preference.digest_interval_minutes is not None:
         raise ValueError("immediate delivery cannot have a digest interval")
     if preference.channel == "in_app" and (
-        not preference.enabled or preference.delivery_mode != "immediate"
-        or preference.quiet_start is not None or preference.critical_bypass
+        not preference.enabled
+        or preference.delivery_mode != "immediate"
+        or preference.quiet_start is not None
+        or preference.critical_bypass
     ):
         raise ValueError("in-app routing must remain enabled and immediate")
     try:
@@ -97,11 +112,15 @@ def load_preference(conn, tenant_id: str, event_type: str, channel: str) -> Rout
     if row is None:
         return default_preference(event_type, channel)
     preference = RoutePreference(
-        event_type=event_type, channel=str(_cell(row, "channel", 1)),
-        enabled=bool(_cell(row, "enabled", 2)), delivery_mode=str(_cell(row, "delivery_mode", 3)),
+        event_type=event_type,
+        channel=str(_cell(row, "channel", 1)),
+        enabled=bool(_cell(row, "enabled", 2)),
+        delivery_mode=str(_cell(row, "delivery_mode", 3)),
         digest_interval_minutes=_cell(row, "digest_interval_minutes", 4),
-        timezone=str(_cell(row, "timezone", 5)), quiet_start=_cell(row, "quiet_start", 6),
-        quiet_end=_cell(row, "quiet_end", 7), critical_bypass=bool(_cell(row, "critical_bypass", 8)),
+        timezone=str(_cell(row, "timezone", 5)),
+        quiet_start=_cell(row, "quiet_start", 6),
+        quiet_end=_cell(row, "quiet_end", 7),
+        critical_bypass=bool(_cell(row, "critical_bypass", 8)),
     )
     _validate(preference)
     return preference

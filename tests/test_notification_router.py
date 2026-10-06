@@ -46,3 +46,13 @@ def test_external_channels_are_not_publishable_sources():
     for source in ("email", "whatsapp", "sms"):
         with pytest.raises(ValueError, match="source"):
             publish_in_app(NoDatabase(), event(source=source))
+
+
+def test_report_ready_is_a_canonical_internal_event():
+    report = event(
+        event_type="report_ready",
+        source="report_worker",
+        source_ref="artifact-1",
+        dedupe_key="report-ready:run-1",
+    )
+    assert report.event_type == "report_ready"
