@@ -26,6 +26,7 @@ from services.rules.compiler import (
 )
 from services.rules.evidence import build_guardrail_context
 from services.rules.freshness import resolve_source_freshness
+from services.rules.protections import active_protection
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 from services.rules.settings import load_tenant_guard_config
 
@@ -187,6 +188,21 @@ def evaluate_tenant(
                     rule["min_clicks"],
                     rule["min_impressions"],
                 )
+                protection = active_protection(
+                    cur,
+                    tenant_id=tenant_id,
+                    entity_type=rule["scope"],
+                    entity_value=key[1],
+                    product_scope=str(row.get("asin") or "*"),
+                    action_type=action_type,
+                    now=now,
+                )
+                if protection.blocked:
+                    decision.block(
+                        gr.Guard.PROTECTED_ENTITY,
+                        f"{protection.policy} protection {protection.protection_id}: "
+                        f"{protection.reason}",
+                    )
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
