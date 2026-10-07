@@ -61,6 +61,8 @@ GUARD_EXPLANATIONS: dict[str, str] = {
     "BOUNDS": "The proposed value falls outside the tenant's min/max bid or budget bounds.",
     "ECONOMICS_INCOMPLETE": "Cost data is missing, so break-even is unknown and profit "
     "rules stay quiet rather than guessing.",
+    "PROTECTED_ENTITY": "An authorized operator protected this keyword, search term or ASIN, "
+    "so automation cannot negate or pause it until control is explicitly returned.",
 }
 
 

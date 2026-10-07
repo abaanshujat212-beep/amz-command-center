@@ -56,6 +56,7 @@ class Guard(str, Enum):
     BLAST_RADIUS = "blast_radius"
     BOUNDS = "bounds"
     ECONOMICS_INCOMPLETE = "economics_incomplete"
+    PROTECTED_ENTITY = "protected_entity"
 
 
 @dataclass(frozen=True)
