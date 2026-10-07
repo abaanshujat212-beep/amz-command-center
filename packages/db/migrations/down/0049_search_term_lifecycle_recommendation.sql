@@ -1,0 +1,3 @@
+drop table if exists search_term_lifecycle_recommendation;
+alter table search_term_harvest_lineage
+  drop constraint if exists search_term_harvest_lineage_id_tenant_key;
