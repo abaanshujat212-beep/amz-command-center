@@ -57,6 +57,9 @@ class Guard(str, Enum):
     BOUNDS = "bounds"
     ECONOMICS_INCOMPLETE = "economics_incomplete"
     PROTECTED_ENTITY = "protected_entity"
+    DUPLICATE_TARGET = "duplicate_target"
+    HARVEST_ROUTE_MISSING = "harvest_route_missing"
+    HARVEST_ROUTE_CONFLICT = "harvest_route_conflict"
 
 
 @dataclass(frozen=True)
