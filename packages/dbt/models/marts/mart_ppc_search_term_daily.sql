@@ -37,7 +37,9 @@ ad_group_economics as (
     select
         p.tenant_id,
         p.ad_group_id,
-        min(e.break_even_acos) as break_even_acos
+        min(e.break_even_acos) as break_even_acos,
+        -- harvest routing needs one unambiguous product; multi-ASIN ad groups stay null
+        case when count(distinct p.asin) = 1 then min(p.asin) end as advertised_asin
     from {{ ref('stg_ads_advertised_product_daily') }} p
     left join {{ ref('mart_sku_economics') }} e
         on  e.tenant_id = p.tenant_id
@@ -70,6 +72,7 @@ select
     case when s.clicks > 0 then s.cost / s.clicks end                           as cpc,
 
     g.break_even_acos,
+    g.advertised_asin,
 
     (n.term is not null) as is_already_negative,
     (x.term is not null) as exists_as_exact,

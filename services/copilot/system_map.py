@@ -63,6 +63,12 @@ GUARD_EXPLANATIONS: dict[str, str] = {
     "rules stay quiet rather than guessing.",
     "PROTECTED_ENTITY": "An authorized operator protected this keyword, search term or ASIN, "
     "so automation cannot negate or pause it until control is explicitly returned.",
+    "DUPLICATE_TARGET": "An exact keyword or product target already covers this search term, "
+    "or an open promotion for it is already queued, so it is not harvested twice.",
+    "HARVEST_ROUTE_MISSING": "No enabled harvest route matches this term's ASIN, brand class, "
+    "match type, strategy and funnel purpose, so there is no safe destination.",
+    "HARVEST_ROUTE_CONFLICT": "Two equally specific harvest routes point at different "
+    "destinations; an operator must resolve the routing before it is promoted.",
 }
 
 

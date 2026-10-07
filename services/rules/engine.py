@@ -26,6 +26,7 @@ from services.rules.compiler import (
 )
 from services.rules.evidence import build_guardrail_context
 from services.rules.freshness import resolve_source_freshness
+from services.rules.harvest import plan_harvest, record_lineage
 from services.rules.protections import active_protection
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 from services.rules.settings import load_tenant_guard_config
@@ -203,6 +204,17 @@ def evaluate_tenant(
                         f"{protection.policy} protection {protection.protection_id}: "
                         f"{protection.reason}",
                     )
+                harvest = None
+                if rule["scope"] == "search_term" and action_type == "create_keyword":
+                    harvest = plan_harvest(
+                        cur,
+                        tenant_id=tenant_id,
+                        search_term=key[1],
+                        lookback_days=rule["lookback_days"],
+                        through=freshness.data_through,
+                    )
+                    if harvest.blocked_by:
+                        decision.block(gr.Guard(harvest.blocked_by), harvest.note)
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
@@ -213,10 +225,14 @@ def evaluate_tenant(
                     min_impressions=rule["min_impressions"],
                     freshness=freshness,
                 )
+                if harvest is not None:
+                    metrics["harvest_routing"] = harvest.evidence()
                 reason = render_reason(
                     rule["action_jsonb"].get("reason_template", rule["code"]),
                     metrics,
                 )
+                if harvest is not None:
+                    reason = f"{reason} Routing: {harvest.routing_reason}"
 
                 cur.execute(
                     "insert into rule_evaluation (tenant_id, rule_id, run_id,"
@@ -232,7 +248,15 @@ def evaluate_tenant(
                         freshness.data_through,
                         json.dumps(metrics, default=str),
                         json.dumps(
-                            {"type": action_type, "value": decision.value},
+                            {
+                                "type": action_type,
+                                "value": decision.value,
+                                **(
+                                    {"destination": harvest.destination}
+                                    if harvest is not None and harvest.destination
+                                    else {}
+                                ),
+                            },
                             default=str,
                         ),
                         reason,
@@ -254,7 +278,7 @@ def evaluate_tenant(
                     " entity_type, entity_id, action_type, before_value,"
                     " after_value, reason_text, clamped, clamp_note,"
                     " idempotency_key) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    " on conflict (tenant_id, idempotency_key) do nothing",
+                    " on conflict (tenant_id, idempotency_key) do nothing returning id",
                     (
                         tenant_id,
                         rule["id"],
@@ -266,7 +290,14 @@ def evaluate_tenant(
                         json.dumps(
                             {"value": decision.value, "diagnostic": True}
                             if diagnostic
-                            else {"value": decision.value}
+                            else {
+                                "value": decision.value,
+                                **(
+                                    {"destination": harvest.destination}
+                                    if harvest is not None
+                                    else {}
+                                ),
+                            }
                         ),
                         reason,
                         decision.clamped,
@@ -274,6 +305,17 @@ def evaluate_tenant(
                         f"{run_id}:{rule['code']}:{key[1]}",
                     ),
                 )
+                if harvest is not None:
+                    queued = cur.fetchone()
+                    if queued is not None:
+                        record_lineage(
+                            cur,
+                            tenant_id=tenant_id,
+                            run_id=run_id,
+                            evaluation_id=evaluation_id,
+                            action_id=queued["id"],
+                            plan=harvest,
+                        )
                 if diagnostic:
                     s.flagged += 1
                 else:
