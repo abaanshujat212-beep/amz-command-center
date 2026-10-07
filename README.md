@@ -231,6 +231,7 @@ python -m services.scheduler.runner --tenant-id <tenant-id>
 python -m services.scheduler.runner --tenant-id <tenant-id> --show-history --skip-rules
 python -m services.scheduler.runner --tenant-id <tenant-id> --show-catch-up --skip-rules
 python -m services.rules.runner --tenant-id <tenant-id>
+python -m services.rules.ngrams --tenant-id <tenant-id>          # negative n-gram findings
 python -m services.actions.worker --tenant-id <tenant-id>          # dry-run default
 python -m services.actions.worker --tenant-id <tenant-id> --live-ads
 python -m services.actions.verification --tenant-id <tenant-id>
