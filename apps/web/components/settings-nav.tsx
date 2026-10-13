@@ -10,6 +10,7 @@ const sections = [
 	["/settings/notifications", "Notifications"],
 	["/settings/protections", "Protected entities"],
 	["/settings/automation-control", "Automation control"],
+	["/settings/config-rollouts", "Config rollouts"],
 	["/settings/email", "Email services"], ["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
 	["/settings/api-keys", "API keys"], ["/settings/mcp", "MCP readiness"], ["/settings/audit", "Audit logs"],
 ] as const
