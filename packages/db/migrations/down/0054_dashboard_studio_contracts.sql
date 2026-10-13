@@ -1,0 +1,12 @@
+drop table if exists dashboard_default;
+drop table if exists dashboard_version;
+drop table if exists dashboard;
+drop table if exists dashboard_template_version;
+drop table if exists dashboard_template;
+drop function if exists dashboard_visible(uuid,uuid);
+drop function if exists dashboard_editable(uuid,uuid);
+drop function if exists set_dashboard_actor(uuid,text);
+drop function if exists current_dashboard_role();
+drop function if exists current_dashboard_user();
+drop function if exists protect_dashboard_version();
+drop function if exists dashboard_definition_valid(jsonb);

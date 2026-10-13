@@ -101,6 +101,19 @@ export async function withTenant<T>(
 	}
 }
 
+/** Tenant transaction with actor identity for resources whose RLS includes private ownership. */
+export async function withTenantActor<T>(
+	tenantId: string | null | undefined,
+	userId: string,
+	role: TenantRole,
+	fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+	return withTenant(tenantId, async client => {
+		await client.query("select set_dashboard_actor($1,$2)", [userId, role])
+		return fn(client)
+	})
+}
+
 /**
  * Run a query inside a tenant transaction.
  *
