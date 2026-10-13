@@ -75,6 +75,8 @@ class Action:
     outcome: str | None = None
     error: str | None = None
     idempotency_key: str | None = None
+    control_id: str | None = None
+    request_origin: str = "automation"
 
     @property
     def expires_at(self) -> dt.datetime:
