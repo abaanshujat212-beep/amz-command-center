@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass, field
 import psycopg
 from psycopg.rows import dict_row
 
+from services.actions.human_control import active_control
 from services.rules import guardrails as gr
 from services.rules.compiler import (
     RuleValidationError,
@@ -39,8 +40,8 @@ class RunSummary:
     rules_run: int = 0
     entities_evaluated: int = 0
     matched: int = 0
-    proposed: int = 0          # changes queued for approval
-    flagged: int = 0           # diagnostics raised (nothing to approve)
+    proposed: int = 0  # changes queued for approval
+    flagged: int = 0  # diagnostics raised (nothing to approve)
     blocked: dict = field(default_factory=dict)
     errors: list = field(default_factory=list)
     source_freshness: dict = field(default_factory=dict)
@@ -128,9 +129,7 @@ def evaluate_tenant(
             )
             s.source_freshness[rule["scope"]] = freshness.as_dict()
             if not freshness.usable:
-                s.blocked[freshness.block_reason] = (
-                    s.blocked.get(freshness.block_reason, 0) + 1
-                )
+                s.blocked[freshness.block_reason] = s.blocked.get(freshness.block_reason, 0) + 1
                 continue
 
             s.rules_run += 1
@@ -178,9 +177,7 @@ def evaluate_tenant(
                     budget_increase_today=budget_today,
                     entities_evaluated=len(rows),
                     entities_matched=len(matched),
-                    last_applied_at=_last_applied(
-                        cur, tenant_id, rule["scope"], key[1]
-                    ),
+                    last_applied_at=_last_applied(cur, tenant_id, rule["scope"], key[1]),
                 )
                 decision = gr.check(
                     proposal,
@@ -203,6 +200,19 @@ def evaluate_tenant(
                         gr.Guard.PROTECTED_ENTITY,
                         f"{protection.policy} protection {protection.protection_id}: "
                         f"{protection.reason}",
+                    )
+                ownership = active_control(
+                    cur,
+                    tenant_id=tenant_id,
+                    entity_type=rule["scope"],
+                    entity_id=key[1],
+                    product_scope=str(row.get("asin") or "*"),
+                    now=now,
+                )
+                if ownership.blocked:
+                    decision.block(
+                        gr.Guard.HUMAN_CONTROL,
+                        f"{ownership.state} control {ownership.control_id}: {ownership.reason}",
                     )
                 harvest = None
                 if rule["scope"] == "search_term" and action_type == "create_keyword":

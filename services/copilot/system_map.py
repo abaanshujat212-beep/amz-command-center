@@ -63,6 +63,8 @@ GUARD_EXPLANATIONS: dict[str, str] = {
     "rules stay quiet rather than guessing.",
     "PROTECTED_ENTITY": "An authorized operator protected this keyword, search term or ASIN, "
     "so automation cannot negate or pause it until control is explicitly returned.",
+    "HUMAN_CONTROL": "An operator owns this entity through a human override or lock. Rules and "
+    "the worker stay blocked until automation is explicitly resumed.",
     "DUPLICATE_TARGET": "An exact keyword or product target already covers this search term, "
     "or an open promotion for it is already queued, so it is not harvested twice.",
     "HARVEST_ROUTE_MISSING": "No enabled harvest route matches this term's ASIN, brand class, "

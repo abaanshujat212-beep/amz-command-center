@@ -57,6 +57,7 @@ class Guard(str, Enum):
     BOUNDS = "bounds"
     ECONOMICS_INCOMPLETE = "economics_incomplete"
     PROTECTED_ENTITY = "protected_entity"
+    HUMAN_CONTROL = "human_control"
     DUPLICATE_TARGET = "duplicate_target"
     HARVEST_ROUTE_MISSING = "harvest_route_missing"
     HARVEST_ROUTE_CONFLICT = "harvest_route_conflict"
@@ -68,11 +69,11 @@ class TenantGuardConfig:
 
     automation_enabled: bool = False
     dry_run: bool = True
-    max_change_pct: float = 0.25          # +/-25% per single change
+    max_change_pct: float = 0.25  # +/-25% per single change
     cooldown_days: int = 3
     max_changes_per_day: int = 50
     max_budget_increase_per_day: float = 50.00
-    blast_radius_pct: float = 0.30        # >30% of entities matched = halt
+    blast_radius_pct: float = 0.30  # >30% of entities matched = halt
     min_bid: float = 0.02
     max_bid: float = 5.00
     max_daily_budget: float = 100.00
@@ -84,7 +85,7 @@ class TenantGuardConfig:
 class Proposal:
     entity_type: str
     entity_id: str
-    action_type: str                       # 'set_bid' | 'set_budget' | 'flag' | ...
+    action_type: str  # 'set_bid' | 'set_budget' | 'flag' | ...
     before_value: float | None
     after_value: float | None
     clicks: int = 0
@@ -114,13 +115,13 @@ class Decision:
 @dataclass(frozen=True)
 class RunContext:
     now: dt.datetime
-    data_through: dt.date            # newest settled report date available
-    data_loaded_at: dt.datetime      # when the newest data landed
+    data_through: dt.date  # newest settled report date available
+    data_loaded_at: dt.datetime  # when the newest data landed
     changes_applied_today: int = 0
     budget_increase_today: float = 0.0
     entities_evaluated: int = 0
     entities_matched: int = 0
-    last_applied_at: dt.datetime | None = None   # for this entity
+    last_applied_at: dt.datetime | None = None  # for this entity
 
 
 def clamp_change(
@@ -171,7 +172,7 @@ def _data_quality(
         return d.block(Guard.STALE_DATA, f"newest data is {age_h:.0f}h old")
 
     # Settlement lag: Amazon restates attributed sales for days.
-    latest_settled = (ctx.now.date() - dt.timedelta(days=cfg.settlement_lag_days))
+    latest_settled = ctx.now.date() - dt.timedelta(days=cfg.settlement_lag_days)
     if ctx.data_through > latest_settled:
         return d.block(
             Guard.UNSETTLED_DATA,

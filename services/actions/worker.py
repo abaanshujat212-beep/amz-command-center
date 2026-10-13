@@ -16,6 +16,7 @@ from packages.shared.action_capabilities import assert_worker_capability
 from services.actions import state_machine as sm
 from services.actions.apply_guardrails import ApplyGuardrailError, validate_apply_guardrails
 from services.actions.audit import EventType, append_event, event_for, sanitize
+from services.actions.human_control import active_control, complete_one_time_control
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
 from services.rules.settings import GuardrailConfigError, load_tenant_guard_config
@@ -53,7 +54,9 @@ class DryRunActionClient:
 class AdsActionClient:
     """Translate approved action rows into Ads API reads and mutations."""
 
-    def __init__(self, ads: AdsClient, readiness_state: str | None, verification_level: str | None) -> None:
+    def __init__(
+        self, ads: AdsClient, readiness_state: str | None, verification_level: str | None
+    ) -> None:
         self.ads = ads
         self.readiness_state = readiness_state
         self.verification_level = verification_level
@@ -96,7 +99,9 @@ class AdsActionClient:
                 float(action.before_value["value"]) if action.before_value else None,
                 dry_run=False,
             )
-        raise NotImplementedError(f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}")
+        raise NotImplementedError(
+            f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}"
+        )
 
     def rollback(self, action: sm.Action) -> dict:
         self._require(action, "rollback")
@@ -107,26 +112,38 @@ class AdsActionClient:
             return self.ads.update_bid(action.entity_id, float(original), dry_run=False)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(original), dry_run=False)
-        raise NotImplementedError(f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}")
+        raise NotImplementedError(
+            f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}"
+        )
 
 
 def _to_action(row: dict) -> sm.Action:
     return sm.Action(
-        id=str(row["id"]), tenant_id=str(row["tenant_id"]), entity_type=row["entity_type"],
-        entity_id=row["entity_id"], action_type=row["action_type"], before_value=row["before_value"],
-        after_value=row["after_value"], status=sm.Status(row["status"]),
+        id=str(row["id"]),
+        tenant_id=str(row["tenant_id"]),
+        entity_type=row["entity_type"],
+        entity_id=row["entity_id"],
+        action_type=row["action_type"],
+        before_value=row["before_value"],
+        after_value=row["after_value"],
+        status=sm.Status(row["status"]),
         approved_by=str(row["approved_by"]) if row["approved_by"] else None,
-        approved_at=row["approved_at"], applied_at=row["applied_at"],
+        approved_at=row["approved_at"],
+        applied_at=row["applied_at"],
         idempotency_key=row["idempotency_key"],
+        control_id=str(row["control_id"]) if row["control_id"] else None,
+        request_origin=row["request_origin"],
     )
 
 
 def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
     rows = conn.execute(
         """select id, tenant_id, entity_type, entity_id, action_type, before_value,
-               after_value, status, approved_by, approved_at, applied_at, idempotency_key
+               after_value, status, approved_by, approved_at, applied_at, idempotency_key,
+               control_id, request_origin
           from action where tenant_id = %s and status = 'approved'
-         order by approved_at nulls first, requested_at limit %s""", (tenant_id, limit),
+         order by approved_at nulls first, requested_at limit %s""",
+        (tenant_id, limit),
     ).fetchall()
     return [_to_action(r) for r in rows]
 
@@ -139,7 +156,9 @@ def start_worker_run(conn, tenant_id: str) -> uuid.UUID:
     return row["id"]
 
 
-def finish_worker_run(conn, run_id: uuid.UUID, result: WorkerResult, error: str | None = None) -> None:
+def finish_worker_run(
+    conn, run_id: uuid.UUID, result: WorkerResult, error: str | None = None
+) -> None:
     status = "failed" if error or result.failed else "success"
     conn.execute(
         """update pipeline_run set finished_at = now(), status = %s, rows_loaded = %s,
@@ -154,7 +173,8 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
           from amazon_connection c
           left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
          where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
-         order by p.created_at nulls last limit 1""", (tenant_id,),
+         order by p.created_at nulls last limit 1""",
+        (tenant_id,),
     ).fetchone()
     if row is None or row["refresh_token_encrypted"] is None:
         raise RuntimeError(f"tenant {tenant_id} has no active Ads API refresh token")
@@ -163,8 +183,14 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
     if not client_id or not client_secret:
         raise RuntimeError("ADS_CLIENT_ID and ADS_CLIENT_SECRET must be set")
     ads = AdsClient(
-        AdsCredentials(client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])), row["profile_id"]),
-        tenant_id=tenant_id, region=row["region"],
+        AdsCredentials(
+            client_id,
+            client_secret,
+            unseal(bytes(row["refresh_token_encrypted"])),
+            row["profile_id"],
+        ),
+        tenant_id=tenant_id,
+        region=row["region"],
     )
     ads.connection_id = row["id"]
     return ads
@@ -175,7 +201,8 @@ def load_action_readiness(conn, tenant_id: str) -> tuple[str | None, str | None]
         """select readiness_state, metadata->>'verification_level' as verification_level
           from external_dependency_state
          where tenant_id = %s and module_key = 'ppc' and dependency_key = 'amazon_ads'
-         order by updated_at desc limit 1""", (tenant_id,),
+         order by updated_at desc limit 1""",
+        (tenant_id,),
     ).fetchone()
     if row is None:
         return None, None
@@ -206,45 +233,84 @@ def persist_rotated_refresh_token(conn, ads: AdsClient) -> None:
 
 
 def record_apply_start(conn, action: sm.Action, *, correlation_key: str, attempt: int = 1) -> None:
-    for kind, suffix in ((EventType.APPLY_REQUESTED, "requested"), (EventType.APPLY_STARTED, "started")):
-        append_event(conn, event_for(
-            action, kind, correlation_key=correlation_key,
-            dedupe_key=f"apply:{attempt}:{correlation_key}:{suffix}", retry_attempt=attempt,
-            actor_id="action-worker", previous_state=action.status.value, new_state=action.status.value,
-        ))
+    for kind, suffix in (
+        (EventType.APPLY_REQUESTED, "requested"),
+        (EventType.APPLY_STARTED, "started"),
+    ):
+        append_event(
+            conn,
+            event_for(
+                action,
+                kind,
+                correlation_key=correlation_key,
+                dedupe_key=f"apply:{attempt}:{correlation_key}:{suffix}",
+                retry_attempt=attempt,
+                actor_id="action-worker",
+                previous_state=action.status.value,
+                new_state=action.status.value,
+            ),
+        )
 
 
-def persist_apply_result(conn, action: sm.Action, api_response: dict | None = None, *, correlation_key: str | None = None, attempt: int = 1) -> None:
+def persist_apply_result(
+    conn,
+    action: sm.Action,
+    api_response: dict | None = None,
+    *,
+    correlation_key: str | None = None,
+    attempt: int = 1,
+) -> None:
     conn.execute(
         """update action set status = %s, before_value = %s, applied_at = %s,
                error = %s, api_response = %s where tenant_id = %s and id = %s""",
-        (action.status.value, psycopg.types.json.Jsonb(action.before_value), action.applied_at,
-         action.error, psycopg.types.json.Jsonb(sanitize(api_response or {})), action.tenant_id, action.id),
+        (
+            action.status.value,
+            psycopg.types.json.Jsonb(action.before_value),
+            action.applied_at,
+            action.error,
+            psycopg.types.json.Jsonb(sanitize(api_response or {})),
+            action.tenant_id,
+            action.id,
+        ),
     )
     if correlation_key is None:
         return
-    drift = action.status == sm.Status.FAILED and bool(action.error and action.error.startswith("drift:"))
+    drift = action.status == sm.Status.FAILED and bool(
+        action.error and action.error.startswith("drift:")
+    )
     if drift:
         kind, classification = EventType.DRIFT_BLOCKED, "drift_blocked"
     elif action.status == sm.Status.APPLIED:
         kind, classification = EventType.APPLY_SUCCEEDED, "success"
     else:
         kind, classification = EventType.APPLY_FAILED, "failed"
-    append_event(conn, event_for(
-        action, kind, correlation_key=correlation_key,
-        dedupe_key=f"apply:{attempt}:{correlation_key}:result", retry_attempt=attempt,
-        actor_id="action-worker", previous_state=sm.Status.APPROVED.value,
-        new_state=action.status.value,
-        applied_value=api_response if action.status == sm.Status.APPLIED else None,
-        provider_result_classification=classification,
-        metadata={"error": action.error} if action.error else {},
-    ))
+    append_event(
+        conn,
+        event_for(
+            action,
+            kind,
+            correlation_key=correlation_key,
+            dedupe_key=f"apply:{attempt}:{correlation_key}:result",
+            retry_attempt=attempt,
+            actor_id="action-worker",
+            previous_state=sm.Status.APPROVED.value,
+            new_state=action.status.value,
+            applied_value=api_response if action.status == sm.Status.APPLIED else None,
+            provider_result_classification=classification,
+            metadata={"error": action.error} if action.error else {},
+        ),
+    )
+    if action.status == sm.Status.APPLIED:
+        complete_one_time_control(conn, tenant_id=action.tenant_id, control_id=action.control_id)
 
 
-def persist_worker_alert(conn, tenant_id: str, *, kind: str, severity: str, title: str, entity_ref: str, detail: dict) -> bool:
+def persist_worker_alert(
+    conn, tenant_id: str, *, kind: str, severity: str, title: str, entity_ref: str, detail: dict
+) -> bool:
     existing = conn.execute(
         """select id from alert where tenant_id = %s and kind = %s and entity_ref = %s
-         and resolved_at is null limit 1""", (tenant_id, kind, entity_ref),
+         and resolved_at is null limit 1""",
+        (tenant_id, kind, entity_ref),
     ).fetchone()
     if existing is not None:
         return False
@@ -260,42 +326,109 @@ def persist_action_failure_alert(conn, action: sm.Action) -> bool:
     if action.status != sm.Status.FAILED:
         return False
     return persist_worker_alert(
-        conn, action.tenant_id, kind="action_failed", severity="critical",
-        title=f"Action {action.id} failed: {action.action_type}", entity_ref=action.id,
-        detail={"action_id": action.id, "entity_type": action.entity_type,
-                "entity_id": action.entity_id, "action_type": action.action_type, "error": action.error},
+        conn,
+        action.tenant_id,
+        kind="action_failed",
+        severity="critical",
+        title=f"Action {action.id} failed: {action.action_type}",
+        entity_ref=action.id,
+        detail={
+            "action_id": action.id,
+            "entity_type": action.entity_type,
+            "entity_id": action.entity_id,
+            "action_type": action.action_type,
+            "error": action.error,
+        },
     )
 
 
 def persist_auth_failure_alert(conn, tenant_id: str, error: str) -> bool:
     return persist_worker_alert(
-        conn, tenant_id, kind="auth_expired", severity="critical",
-        title="Ads action worker could not load credentials", entity_ref="ads_api",
+        conn,
+        tenant_id,
+        kind="auth_expired",
+        severity="critical",
+        title="Ads action worker could not load credentials",
+        entity_ref="ads_api",
         detail={"provider": "ads_api", "error": error},
     )
 
 
-def apply_action(action: sm.Action, client: ActionClient, *, now: dt.datetime) -> tuple[sm.Action, dict | None]:
+def apply_action(
+    action: sm.Action, client: ActionClient, *, now: dt.datetime
+) -> tuple[sm.Action, dict | None]:
     try:
         live_before = client.read_before_value(action)
         response = client.apply(action)
     except Exception as exc:
-        return sm.apply(action, now=now, live_before_value=action.before_value, api_ok=False, error=str(exc)), None
+        return sm.apply(
+            action, now=now, live_before_value=action.before_value, api_ok=False, error=str(exc)
+        ), None
     return sm.apply(action, now=now, live_before_value=live_before, api_ok=True), response
 
 
-def block_live_actions(conn, actions: list[sm.Action], result: WorkerResult, *, now: dt.datetime, correlation_key: str, error: str) -> None:
+def block_live_actions(
+    conn,
+    actions: list[sm.Action],
+    result: WorkerResult,
+    *,
+    now: dt.datetime,
+    correlation_key: str,
+    error: str,
+) -> None:
     """Persist a guardrail failure without starting or calling a provider."""
     for action in actions:
-        failed = sm.apply(action, now=now, live_before_value=action.before_value,
-                          api_ok=False, error=f"guardrail: {error}")
+        failed = sm.apply(
+            action,
+            now=now,
+            live_before_value=action.before_value,
+            api_ok=False,
+            error=f"guardrail: {error}",
+        )
         persist_apply_result(conn, failed, correlation_key=correlation_key)
         result.failed += 1
         if persist_action_failure_alert(conn, failed):
             result.alerts_created += 1
 
 
-def validate_live_batch(conn, actions: list[sm.Action], cfg, result: WorkerResult, *, now: dt.datetime, correlation_key: str) -> list[sm.Action]:
+def validate_control_batch(
+    conn, actions: list[sm.Action], result: WorkerResult, *, now: dt.datetime, correlation_key: str
+) -> list[sm.Action]:
+    """Recheck ownership immediately before any dry-run or live provider call."""
+    eligible = []
+    with conn.cursor(row_factory=dict_row) as cur:
+        for action in actions:
+            ownership = active_control(
+                cur,
+                tenant_id=action.tenant_id,
+                entity_type=action.entity_type,
+                entity_id=action.entity_id,
+                action_control_id=action.control_id,
+                now=now,
+            )
+            if ownership.blocked:
+                block_live_actions(
+                    conn,
+                    [action],
+                    result,
+                    now=now,
+                    correlation_key=correlation_key,
+                    error=f"{ownership.state}: human control {ownership.control_id} blocks automation",
+                )
+            else:
+                eligible.append(action)
+    return eligible
+
+
+def validate_live_batch(
+    conn,
+    actions: list[sm.Action],
+    cfg,
+    result: WorkerResult,
+    *,
+    now: dt.datetime,
+    correlation_key: str,
+) -> list[sm.Action]:
     """Validate the complete batch before any credentials are loaded."""
     eligible = []
     projected_changes = 0
@@ -304,12 +437,17 @@ def validate_live_batch(conn, actions: list[sm.Action], cfg, result: WorkerResul
         for action in actions:
             try:
                 validation = validate_apply_guardrails(
-                    cur, action, cfg, now=now, projected_changes=projected_changes,
+                    cur,
+                    action,
+                    cfg,
+                    now=now,
+                    projected_changes=projected_changes,
                     projected_budget_increase=projected_budget_increase,
                 )
             except ApplyGuardrailError as exc:
-                block_live_actions(conn, [action], result, now=now,
-                                   correlation_key=correlation_key, error=str(exc))
+                block_live_actions(
+                    conn, [action], result, now=now, correlation_key=correlation_key, error=str(exc)
+                )
                 continue
             eligible.append(action)
             projected_changes += 1
@@ -317,8 +455,14 @@ def validate_live_batch(conn, actions: list[sm.Action], cfg, result: WorkerResul
     return eligible
 
 
-def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = None,
-             database_url: str = DATABASE_URL, live_ads: bool = False) -> WorkerResult:
+def run_once(
+    tenant_id: str,
+    *,
+    limit: int = 25,
+    client: ActionClient | None = None,
+    database_url: str = DATABASE_URL,
+    live_ads: bool = False,
+) -> WorkerResult:
     result = WorkerResult()
     now = dt.datetime.now(dt.timezone.utc)
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
@@ -332,12 +476,22 @@ def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = N
                 finish_worker_run(conn, run_id, result)
                 conn.commit()
                 return result
+            actions = validate_control_batch(
+                conn, actions, result, now=now, correlation_key=str(run_id)
+            )
+            if not actions:
+                finish_worker_run(
+                    conn, run_id, result, error="all actions blocked by human control"
+                )
+                conn.commit()
+                return result
             if live_ads:
                 try:
                     cfg = require_current_live_consent(conn, tenant_id)
                 except GuardrailConfigError as exc:
-                    block_live_actions(conn, actions, result, now=now,
-                                       correlation_key=str(run_id), error=str(exc))
+                    block_live_actions(
+                        conn, actions, result, now=now, correlation_key=str(run_id), error=str(exc)
+                    )
                     finish_worker_run(conn, run_id, result, error=str(exc))
                     conn.commit()
                     return result
@@ -345,7 +499,9 @@ def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = N
                     conn, actions, cfg, result, now=now, correlation_key=str(run_id)
                 )
                 if not actions:
-                    finish_worker_run(conn, run_id, result, error="all actions blocked by guardrails")
+                    finish_worker_run(
+                        conn, run_id, result, error="all actions blocked by guardrails"
+                    )
                     conn.commit()
                     return result
             if client is None:
@@ -367,8 +523,9 @@ def run_once(tenant_id: str, *, limit: int = 25, client: ActionClient | None = N
                 if live_ads:
                     record_apply_start(conn, action, correlation_key=correlation_key)
                 updated, response = apply_action(action, client, now=now)
-                persist_apply_result(conn, updated, response,
-                                     correlation_key=correlation_key if live_ads else None)
+                persist_apply_result(
+                    conn, updated, response, correlation_key=correlation_key if live_ads else None
+                )
                 if updated.status == sm.Status.APPLIED:
                     result.applied += 1
                 else:
@@ -389,12 +546,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Apply approved actions for one tenant")
     parser.add_argument("--tenant-id", default=os.environ.get("DEV_TENANT_ID"))
     parser.add_argument("--limit", type=int, default=25)
-    parser.add_argument("--live-ads", action="store_true", help="Use the real Ads client instead of dry-run")
+    parser.add_argument(
+        "--live-ads", action="store_true", help="Use the real Ads client instead of dry-run"
+    )
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
     result = run_once(args.tenant_id, limit=args.limit, live_ads=args.live_ads)
-    print(f"actions scanned={result.scanned} applied={result.applied} failed={result.failed} alerts_created={result.alerts_created}")
+    print(
+        f"actions scanned={result.scanned} applied={result.applied} failed={result.failed} alerts_created={result.alerts_created}"
+    )
 
 
 if __name__ == "__main__":

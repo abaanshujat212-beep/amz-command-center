@@ -9,6 +9,7 @@ const sections = [
 	["/settings/amazon", "Amazon integrations"], ["/settings/coverage", "Feature coverage"],
 	["/settings/notifications", "Notifications"],
 	["/settings/protections", "Protected entities"],
+	["/settings/automation-control", "Automation control"],
 	["/settings/email", "Email services"], ["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
 	["/settings/api-keys", "API keys"], ["/settings/mcp", "MCP readiness"], ["/settings/audit", "Audit logs"],
 ] as const
