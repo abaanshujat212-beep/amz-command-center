@@ -7,6 +7,7 @@ import {
 } from "@/lib/queries-drilldown"
 import { ALLOWED_WINDOWS, parseDays, windowHref, type Window } from "@/lib/range"
 import { currentTenantId } from "@/lib/session"
+import { SearchIntelligenceNav } from "@/components/search-intelligence-nav"
 
 export const dynamic = "force-dynamic"
 
@@ -87,12 +88,14 @@ export default async function SearchTerms({
 	const wasted = terms
 		.filter((t) => t.orders === 0)
 		.reduce((sum, t) => sum + Number(t.cost ?? 0), 0)
+	const loadedAt = terms.length ? terms.reduce((value, term) => value > term.source_loaded_at ? value : term.source_loaded_at, terms[0].source_loaded_at) : null
 
 	return (
 		<div className="space-y-6">
+			<SearchIntelligenceNav active="/search-terms" />
 			<div className="flex flex-wrap items-baseline justify-between gap-3">
 				<div>
-					<h1 className="text-lg font-semibold">Search terms</h1>
+					<h1 className="text-lg font-semibold">Ads search terms</h1>
 					<div className="text-xs text-slate-500">
 						{campaign ? (
 							<>
@@ -112,6 +115,14 @@ export default async function SearchTerms({
 					</div>
 				</div>
 				<WindowPicker days={days} campaign={campaign ?? undefined} />
+			</div>
+
+			<div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-600 sm:grid-cols-5">
+				<div><b className="block text-slate-900">Source</b>Amazon Ads search-term report</div>
+				<div><b className="block text-slate-900">Scope</b>Your advertised products only</div>
+				<div><b className="block text-slate-900">Grain</b>Search term by campaign and ad group, rolled up</div>
+				<div><b className="block text-slate-900">Observed</b>{terms.length ? `${terms.reduce((a, t) => a < t.window_start ? a : t.window_start, terms[0].window_start)} to ${terms.reduce((a, t) => a > t.window_end ? a : t.window_end, terms[0].window_end)}` : "No source rows"}</div>
+				<div><b className="block text-slate-900">Loaded</b>{loadedAt ? new Date(loadedAt).toLocaleString("en-GB", { timeZone: "UTC" }) + " UTC" : "No source rows"}</div>
 			</div>
 
 			{terms.length === 0 ? (

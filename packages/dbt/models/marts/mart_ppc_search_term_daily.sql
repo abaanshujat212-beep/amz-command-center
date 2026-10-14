@@ -59,6 +59,15 @@ select
     s.match_type            as matched_match_type,
     s.bid,
 
+    -- Ads search terms describe shoppers who reached this tenant's ads; they
+    -- are account observations, not market-demand estimates.
+    'amazon_ads'::text as observation_source,
+    'owned_advertising'::text as observation_scope,
+    'search_term_campaign_ad_group_day'::text as observation_grain,
+    s.report_date as window_start,
+    s.report_date as window_end,
+    s.loaded_at as source_loaded_at,
+
     s.impressions,
     s.clicks,
     s.cost,

@@ -224,6 +224,12 @@ export type SearchTermRow = {
 	break_even_acos: number | null
 	is_already_negative: boolean
 	exists_as_exact: boolean
+	observation_source: "amazon_ads"
+	observation_scope: "owned_advertising"
+	observation_grain: "search_term_campaign_ad_group_day"
+	window_start: string
+	window_end: string
+	source_loaded_at: string
 }
 
 /**
@@ -270,7 +276,13 @@ export async function searchTermPerformance(
 			     then sum(cost) / sum(clicks) end as cpc,
 			min(break_even_acos)          as break_even_acos,
 			bool_or(is_already_negative)  as is_already_negative,
-			bool_or(exists_as_exact)      as exists_as_exact
+			bool_or(exists_as_exact)      as exists_as_exact,
+			min(observation_source)       as observation_source,
+			min(observation_scope)        as observation_scope,
+			min(observation_grain)        as observation_grain,
+			min(window_start)::text       as window_start,
+			max(window_end)::text         as window_end,
+			max(source_loaded_at)::text   as source_loaded_at
 		  from window_rows
 		 group by search_term
 		 order by sum(cost) desc
