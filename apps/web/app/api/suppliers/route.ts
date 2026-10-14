@@ -1,0 +1,5 @@
+import { withTenant } from "@/lib/db"
+import { currentContext } from "@/lib/session"
+import { createSupplier,listSupplierWorkspace,SupplierInputError } from "@/lib/suppliers"
+export async function GET(){const a=await currentContext();return Response.json(await withTenant(a.tenantId,c=>listSupplierWorkspace(c,a.tenantId,a.role)))}
+export async function POST(request:Request){try{const a=await currentContext(),body=await request.json().catch(()=>({}));return Response.json({supplier:await withTenant(a.tenantId,c=>createSupplier(c,a.tenantId,a.userId,a.role,body))},{status:201})}catch(e){if(e instanceof SupplierInputError)return Response.json({error:e.message},{status:e.status});throw e}}
