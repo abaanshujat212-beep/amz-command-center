@@ -34,7 +34,8 @@ export function parseDashboardDefinition(value: unknown): DashboardDefinition {
 		ids.add(candidate.id)
 		if (typeof candidate.type !== "string" || !allowed(candidate.type, DASHBOARD_WIDGET_TYPES)) throw new DashboardInputError("widget type is not allowlisted")
 		if (typeof candidate.query !== "string" || !allowed(candidate.query, DASHBOARD_QUERIES)) throw new DashboardInputError("widget query is not allowlisted")
-		if (!object(candidate.layout) || !["x", "y", "w", "h"].every(key => Number.isInteger(candidate.layout[key])) || Number(candidate.layout.w) < 1 || Number(candidate.layout.w) > 12 || Number(candidate.layout.h) < 1 || Number(candidate.layout.h) > 20) throw new DashboardInputError("widget layout is invalid")
+		const layout = candidate.layout
+		if (!object(layout) || !["x", "y", "w", "h"].every(key => Number.isInteger(layout[key])) || Number(layout.w) < 1 || Number(layout.w) > 12 || Number(layout.h) < 1 || Number(layout.h) > 20) throw new DashboardInputError("widget layout is invalid")
 		if (candidate.filters !== undefined) { if (!Array.isArray(candidate.filters)) throw new DashboardInputError("widget filters must be an array"); candidate.filters.forEach(validateFilter) }
 	}
 	if (value.globalFilters !== undefined) { if (!Array.isArray(value.globalFilters)) throw new DashboardInputError("globalFilters must be an array"); value.globalFilters.forEach(validateFilter) }
