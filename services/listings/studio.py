@@ -163,6 +163,14 @@ def review_draft(
     ).fetchone()
     if latest is None or str(_cell(latest, "id")) != str(draft_version_id):
         raise ValueError("only the latest draft version can enter review")
+    if decision in {"submitted", "approved"}:
+        validation = conn.execute(
+            """select passed from listing_validation_run
+                where tenant_id=%s and draft_version_id=%s order by created_at desc limit 1""",
+            (tenant_id, draft_version_id),
+        ).fetchone()
+        if validation is None or _cell(validation, "passed") is not True:
+            raise ValueError("draft must pass the latest deterministic validation before review")
     conn.execute(
         """insert into listing_review_event(
                tenant_id,project_id,draft_version_id,decision,comment,actor_user_id)
