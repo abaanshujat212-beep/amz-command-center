@@ -8,10 +8,13 @@ export const DASHBOARD_QUERIES = ["dashboard.summary", "campaign.performance", "
 export const DASHBOARD_FILTER_FIELDS = ["marketplace", "dateRange", "campaignId", "asin", "sku", "status"] as const
 export const DASHBOARD_FILTER_OPERATORS = ["eq", "in", "between", "gte", "lte"] as const
 
-type Filter = { field: string; operator: string; value: unknown }
-type Widget = { id: string; type: string; query: string; layout: { x: number; y: number; w: number; h: number }; filters?: Filter[]; [key: string]: unknown }
+export type DashboardFilter = { field: string; operator: string; value: unknown }
+export type DashboardWidget = { id: string; type: string; query: string; title?: string; layout: { x: number; y: number; w: number; h: number }; filters?: DashboardFilter[]; [key: string]: unknown }
+type Filter = DashboardFilter
+type Widget = DashboardWidget
 export type DashboardDefinition = { schemaVersion: 1; widgets: Widget[]; globalFilters?: Filter[]; [key: string]: unknown }
-type DashboardRow = QueryResultRow & { id: string; owner_user_id: string; source_template_key: string | null; source_template_version: number | null; current_version: number; definition: DashboardDefinition }
+export type DashboardRow = QueryResultRow & { id: string; name: string; visibility: "private" | "team"; owner_user_id: string; source_template_key: string | null; source_template_version: number | null; current_version: number; definition: DashboardDefinition; is_default?: boolean; template_update_available?: boolean; updated_at?: string }
+export type DashboardTemplateRow = QueryResultRow & { template_key: string; name: string; description: string | null; current_version: number; definition: DashboardDefinition; release_notes: string }
 
 export class DashboardInputError extends Error {
 	constructor(message: string, readonly status = 400) { super(message) }
@@ -55,7 +58,7 @@ export async function listDashboards(client: PoolClient, userId: string) {
 	return query(client, `select d.id,d.name,d.visibility,d.owner_user_id,d.source_template_key,d.source_template_version,d.current_version,d.updated_at,df.user_id is not null as is_default,v.definition,(t.current_version is not null and t.current_version>d.source_template_version) as template_update_available from dashboard d join dashboard_version v on v.tenant_id=d.tenant_id and v.dashboard_id=d.id and v.version=d.current_version left join dashboard_default df on df.tenant_id=d.tenant_id and df.dashboard_id=d.id and df.user_id=$1 left join dashboard_template t on t.template_key=d.source_template_key where not d.is_archived order by is_default desc,d.updated_at desc`, [userId])
 }
 export async function listDashboardTemplates(client: PoolClient) {
-	return query(client, `select t.template_key,t.name,t.description,t.current_version,v.definition,v.release_notes from dashboard_template t join dashboard_template_version v on v.template_key=t.template_key and v.version=t.current_version order by t.name`)
+	return query<DashboardTemplateRow>(client, `select t.template_key,t.name,t.description,t.current_version,v.definition,v.release_notes from dashboard_template t join dashboard_template_version v on v.template_key=t.template_key and v.version=t.current_version order by t.name`)
 }
 export async function createDashboard(client: PoolClient, tenantId: string, userId: string, role: TenantRole, raw: Record<string, unknown>) {
 	if (!EDIT.has(role)) throw new DashboardInputError("your role cannot create dashboards", 403)

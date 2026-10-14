@@ -34,6 +34,9 @@ export type ReportView = QueryResultRow & {
 	row_count: number | null
 	reconciliation: Record<string, unknown> | null
 	expires_at: string | null
+	progress_current: number
+	progress_total: number | null
+	heartbeat_at: string | null
 }
 
 type ArtifactDownload = QueryResultRow & {
@@ -78,13 +81,17 @@ function validateInput(input: CreateReportInput) {
 
 async function ensureAccountDefinition(client: PoolClient, tenantId: string) {
 	await query(client, `insert into report_definition(tenant_id,code,version,title,source_contract,render_contract_version,definition)
-		values($1,'account-summary',1,'Account summary','governed-account-summary-v1',1,$2::jsonb)
-		on conflict(tenant_id,code,version) do nothing`, [tenantId, JSON.stringify({ columns: ["date", "sales", "spend", "orders", "acos"] })])
+		values($1,'account-summary',2,'Campaign performance','mart-ppc-campaign-daily-v1',1,$2::jsonb)
+		on conflict(tenant_id,code,version) do nothing`, [tenantId, JSON.stringify({
+			columns: ["report_date", "campaign_id", "campaign_name", "campaign_status", "targeting_type", "impressions", "clicks", "cost", "attributed_orders_7d", "attributed_sales_7d", "acos", "roas", "ctr", "cvr", "cpc", "tacos", "break_even_acos", "economics_incomplete", "is_settled"],
+			allowed_filters: ["campaign_status", "targeting_type"],
+		})])
 }
 
 const REPORT_SELECT = `select j.id,j.definition_code,j.definition_version,j.date_from::text,j.date_to::text,
 	j.filters,j.output_format,j.status,j.attempt,j.max_attempts,j.queued_at::text,
 	j.started_at::text,j.finished_at::text,j.error,a.content_sha256,a.byte_size,a.row_count,
+	j.progress_current,j.progress_total,j.heartbeat_at::text,
 	a.reconciliation,a.expires_at::text,
 	case when j.status='failed' then 'FAILED'
 		when j.status<>'succeeded' then 'PENDING'
@@ -116,6 +123,11 @@ export async function getReport(client: PoolClient, tenantId: string, jobId: str
 export async function createReport(client: PoolClient, tenantId: string, userId: string, role: TenantRole, raw: CreateReportInput): Promise<ReportView> {
 	if (!mayRequestReports(role)) throw new ReportRequestError("your tenant role cannot request reports", 403)
 	const input = validateInput(raw)
+	const allowedFilters = new Set(["campaign_status", "targeting_type"])
+	for (const [key, value] of Object.entries(input.filters)) {
+		if (!allowedFilters.has(key)) throw new ReportRequestError(`unsupported filter: ${key}`)
+		if (typeof value !== "string" || value.length > 100) throw new ReportRequestError(`${key} must be a short string`)
+	}
 	await ensureAccountDefinition(client, tenantId)
 	const inserted = await query<{ id: string }>(client, `insert into report_job(
 		tenant_id,report_definition_id,definition_code,definition_version,definition_snapshot,
@@ -124,7 +136,7 @@ export async function createReport(client: PoolClient, tenantId: string, userId:
 		'code',d.code,'version',d.version,'title',d.title,'source_contract',d.source_contract,
 		'render_contract_version',d.render_contract_version,'definition',d.definition),
 		$2,$3,$4,$5,$6::jsonb,$7
-	from report_definition d where d.tenant_id=$1 and d.code='account-summary' and d.version=1 and d.active=true
+	from report_definition d where d.tenant_id=$1 and d.code='account-summary' and d.version=2 and d.active=true
 	on conflict(tenant_id,idempotency_key) do nothing returning id`, [tenantId, userId, input.idempotencyKey, input.dateFrom, input.dateTo, JSON.stringify(input.filters), input.outputFormat])
 	let id = inserted[0]?.id
 	if (id) {
@@ -133,7 +145,7 @@ export async function createReport(client: PoolClient, tenantId: string, userId:
 	} else {
 		const existing = await query<{ id: string }>(client, `select id from report_job where tenant_id=$1 and idempotency_key=$2
 			and requested_by=$3 and date_from=$4 and date_to=$5 and filters=$6::jsonb and output_format=$7
-			and definition_code='account-summary' and definition_version=1`, [tenantId, input.idempotencyKey, userId, input.dateFrom, input.dateTo, JSON.stringify(input.filters), input.outputFormat])
+		and definition_code='account-summary' and definition_version=2`, [tenantId, input.idempotencyKey, userId, input.dateFrom, input.dateTo, JSON.stringify(input.filters), input.outputFormat])
 		if (!existing[0]) throw new ReportRequestError("idempotencyKey is already bound to another report scope", 409)
 		id = existing[0].id
 	}

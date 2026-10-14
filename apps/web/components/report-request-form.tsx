@@ -12,7 +12,7 @@ export function ReportRequestForm({ dateFrom, dateTo }: { dateFrom: string; date
 		const data = new FormData(event.currentTarget)
 		const response = await fetch("/api/reports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
 			dateFrom: data.get("dateFrom"), dateTo: data.get("dateTo"), outputFormat: data.get("outputFormat"),
-			filters: data.get("marketplace") ? { marketplace: data.get("marketplace") } : {}, idempotencyKey: crypto.randomUUID(),
+			filters: Object.fromEntries([["campaign_status", data.get("campaignStatus")], ["targeting_type", data.get("targetingType")]].filter(([, value]) => value)), idempotencyKey: crypto.randomUUID(),
 		}) })
 		const result = await response.json().catch(() => ({}))
 		setBusy(false)
@@ -23,8 +23,9 @@ export function ReportRequestForm({ dateFrom, dateTo }: { dateFrom: string; date
 		<label className="text-xs text-slate-600">From<input required name="dateFrom" type="date" defaultValue={dateFrom} className="mt-1 w-full rounded border px-2 py-2 text-sm" /></label>
 		<label className="text-xs text-slate-600">To<input required name="dateTo" type="date" defaultValue={dateTo} className="mt-1 w-full rounded border px-2 py-2 text-sm" /></label>
 		<label className="text-xs text-slate-600">Format<select name="outputFormat" className="mt-1 w-full rounded border px-2 py-2 text-sm"><option value="csv">CSV</option><option value="xlsx">XLSX</option><option value="pdf">PDF</option></select></label>
-		<label className="text-xs text-slate-600">Marketplace<input name="marketplace" placeholder="optional" className="mt-1 w-full rounded border px-2 py-2 text-sm" /></label>
-		<div className="flex items-end gap-2"><button disabled={busy} className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-300">{busy ? "Queuing…" : "Create report"}</button></div>
+		<label className="text-xs text-slate-600">Campaign status<select name="campaignStatus" className="mt-1 w-full rounded border px-2 py-2 text-sm"><option value="">All</option><option value="enabled">Enabled</option><option value="paused">Paused</option><option value="archived">Archived</option></select></label>
+		<label className="text-xs text-slate-600">Targeting<select name="targetingType" className="mt-1 w-full rounded border px-2 py-2 text-sm"><option value="">All</option><option value="auto">Auto</option><option value="manual">Manual</option></select></label>
+		<div className="flex items-end gap-2 sm:col-span-2 lg:col-span-5"><button disabled={busy} className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-300">{busy ? "Queuing…" : "Create report"}</button></div>
 		{message && <p role="status" className="text-sm sm:col-span-2 lg:col-span-5">{message}</p>}
 	</form>
 }
