@@ -33,7 +33,7 @@ def test_download_is_private_expiry_aware_and_integrity_checked():
     download = ROUTES[-1].read_text()
     assert "storage_key" not in download
     assert '"Cache-Control": "private, no-store"' in download
-    assert "createHash(\"sha256\")" in REPORTS
+    assert 'createHash("sha256")' in REPORTS
     assert "REPORT_ARTIFACT_ROOT" in REPORTS
     assert "artifact failed integrity verification" in REPORTS
 
@@ -42,6 +42,8 @@ def test_reports_workspace_preserves_explicit_states_and_no_delivery():
     for state in ("AVAILABLE", "EXPIRED", "UNAVAILABLE", "FAILED", "PENDING"):
         assert state in REPORTS
     assert "reconciliation" in PAGE
-    assert "Scheduled and external delivery are not enabled" in PAGE
+    assert "Scheduled delivery remains gated" in PAGE
+    assert "progress_current" in REPORTS
+    assert "Heartbeat:" in PAGE
     assert '{ href: "/reports", label: "Reports" }' in NAV
     assert not (ROOT / "packages/db/migrations/0034_reports_workspace.sql").exists()
