@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt actions actions-live scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -26,6 +26,7 @@ help:
 	@echo ""
 	@echo "actions           run approved-action worker in dry-run mode"
 	@echo "actions-live      run approved-action worker with live Ads writes"
+	@echo "reports           render one queued governed report"
 	@echo "scheduler         run ingestion/rules scheduler once"
 	@echo "scheduler-history show recent pipeline run history"
 	@echo "scheduler-catch-up show rolling catch-up gaps"
@@ -94,6 +95,9 @@ actions:
 
 actions-live:
 	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID) --live-ads
+
+reports:
+	@$(ENV) python -m services.reports.worker --tenant-id $(TENANT_ID)
 
 scheduler:
 	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID)
