@@ -1,0 +1,2 @@
+import { withTenant } from "@/lib/db";import { currentContext } from "@/lib/session";import { createProduct,SupplierInputError } from "@/lib/suppliers"
+export async function POST(request:Request){try{const a=await currentContext(),body=await request.json().catch(()=>({}));return Response.json({product:await withTenant(a.tenantId,c=>createProduct(c,a.tenantId,a.userId,a.role,body))},{status:201})}catch(e){if(e instanceof SupplierInputError)return Response.json({error:e.message},{status:e.status});throw e}}
