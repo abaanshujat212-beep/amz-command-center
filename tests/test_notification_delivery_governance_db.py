@@ -27,9 +27,12 @@ def test_templates_attempts_callbacks_and_cost_are_tenant_isolated():
                     """insert into notification_template(tenant_id,event_type,channel,status,subject_template,body_template,variable_allowlist,created_by,approved_by,approved_at) values(%s,'pipeline_failed','email','APPROVED','${title}','${summary}',array['title','summary'],gen_random_uuid(),gen_random_uuid(),now()) returning id""",
                     (tenant_a,),
                 ).fetchone()
-                event = app.execute(
-                    """insert into alert(tenant_id,kind,severity,title,detail,entity_ref,dedupe_key) values(%s,'pipeline_failed','warning','Pipeline failed','{}','pipeline','db-governance') returning notification_event_id""",
+                alert = app.execute(
+                    """insert into alert(tenant_id,kind,severity,title,detail,entity_ref,dedupe_key) values(%s,'pipeline_failed','warning','Pipeline failed','{}','pipeline','db-governance') returning id""",
                     (tenant_a,),
+                ).fetchone()
+                event = app.execute(
+                    "select notification_event_id from alert where id=%s", (alert["id"],)
                 ).fetchone()
                 delivery = app.execute(
                     "update notification_delivery set template_id=%s,status='RETRYABLE',retry_eligible=true where tenant_id=%s and event_id=%s and channel='email' returning id",
@@ -89,9 +92,12 @@ def test_delivery_evidence_is_immutable_and_unverified_callbacks_fail():
         try:
             with psycopg.connect(APP_URL, row_factory=dict_row) as app:
                 app.execute("select set_tenant(%s)", (tenant_id,))
-                event = app.execute(
-                    "insert into alert(tenant_id,kind,severity,title,detail,entity_ref,dedupe_key) values(%s,'data_stale','warning','Stale','{}','dataset','immutability') returning notification_event_id",
+                alert = app.execute(
+                    "insert into alert(tenant_id,kind,severity,title,detail,entity_ref,dedupe_key) values(%s,'data_stale','warning','Stale','{}','dataset','immutability') returning id",
                     (tenant_id,),
+                ).fetchone()
+                event = app.execute(
+                    "select notification_event_id from alert where id=%s", (alert["id"],)
                 ).fetchone()
                 delivery = app.execute(
                     "select id from notification_delivery where event_id=%s and channel='email'",
