@@ -47,3 +47,39 @@ def test_listing_versions_are_immutable_and_tenant_scoped():
         finally:
             admin.execute("delete from tenant where id=any(%s)", ([tenant_a, tenant_b],))
             admin.execute("delete from auth.auth_user where id=%s", (user_id,))
+
+
+def test_listing_validation_runs_are_immutable_and_tenant_scoped():
+    tenant_a, tenant_b, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
+        admin.execute(
+            "insert into auth.auth_user(id,name,email) values(%s,'validator',%s)",
+            (user_id, f"{user_id}@test"),
+        )
+        for tenant in (tenant_a, tenant_b):
+            admin.execute("insert into tenant(id,name,slug) values(%s,'validation',%s)", (tenant, str(tenant)))
+            admin.execute("select set_tenant(%s)", (tenant,))
+            project = admin.execute(
+                "insert into listing_project(tenant_id,name,created_by) values(%s,%s,%s) returning id",
+                (tenant, f"validation-{tenant}", user_id),
+            ).fetchone()[0]
+            draft = admin.execute(
+                """insert into listing_draft_version(tenant_id,project_id,version,title,change_summary,created_by)
+                values(%s,%s,1,'Draft','Initial',%s) returning id""",
+                (tenant, project, user_id),
+            ).fetchone()[0]
+            admin.execute(
+                """insert into listing_validation_run(tenant_id,project_id,draft_version_id,validator_version,
+                restrictions_status,passed,validated_by) values(%s,%s,%s,'listing-v1','unknown',false,%s)""",
+                (tenant, project, draft, user_id),
+            )
+        try:
+            with psycopg.connect(APP_URL) as app:
+                app.execute("select set_tenant(%s)", (tenant_a,))
+                assert app.execute("select count(*) from listing_validation_run").fetchone()[0] == 1
+                with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+                    app.execute("update listing_validation_run set passed=true")
+                app.rollback()
+        finally:
+            admin.execute("delete from tenant where id=any(%s)", ([tenant_a, tenant_b],))
+            admin.execute("delete from auth.auth_user where id=%s", (user_id,))
