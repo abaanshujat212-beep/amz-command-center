@@ -21,21 +21,19 @@ def test_history_reuses_alert_inbox_with_canonical_delivery_metadata():
 
 
 def test_delivery_visibility_stays_tenant_scoped_and_server_side():
-    assert "currentTenantId()" in SETTINGS
-    assert "withTenant(tenantId, notificationDeliverySummary)" in SETTINGS
+    assert "currentContext()" in SETTINGS
+    assert "withTenant(actor.tenantId" in SETTINGS
     assert "from notification_delivery" in NOTIFICATIONS
     assert "fetch(" not in SETTINGS
 
 
-def test_external_channels_are_truthfully_blocked_and_read_only():
-    for channel in ("Email", "WhatsApp", "SMS"):
+def test_external_channels_are_truthfully_governed_and_editable_by_role():
+    for channel in ('"email"', '"whatsapp"', '"sms"'):
         assert channel in SETTINGS
-    assert "Blocked configuration" in SETTINGS
-    assert "External delivery is not enabled" in SETTINGS
-    assert "Provider credentials alone do not make a channel ready" in SETTINGS
-    assert "This page is read-only" in SETTINGS
+    assert "External sends remain blocked" in SETTINGS
+    assert "saveNotificationRoute" in SETTINGS
+    assert "saveNotificationTemplate" in SETTINGS
     assert "process.env" not in SETTINGS
-    assert "<form" not in SETTINGS
 
 
 def test_settings_navigation_exposes_notification_audit():
