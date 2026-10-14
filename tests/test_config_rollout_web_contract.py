@@ -10,4 +10,15 @@ def test_preview_is_tenant_scoped_and_never_queues_amazon_actions():
     assert "withTenant" in ACTIONS and "withTenant" in API
 def test_rollout_requires_operator_reason_and_writes_audit():
     assert "reason" in ACTIONS and "audit_log" in ACTIONS
-    assert "deterministicCanary" in ACTIONS
+    assert "transitionRollout" in ACTIONS
+
+
+def test_completion_publishes_effective_version_and_rollback_restores_prior_version():
+    assert "pct<100" in LIB
+    assert 'state!=="EXPANDED"' in LIB
+    assert 'state:"COMPLETED"' in LIB
+    assert "configuration_override_version" in LIB
+    assert "prior_override_id" in LIB
+    assert "select role from tenant_member" in LIB
+    assert "Configuration changed after rollout completion" in LIB
+    assert "insert into action" not in LIB + ACTIONS + API
