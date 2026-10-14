@@ -10,6 +10,24 @@ models:
         tests: [not_null]
       - name: search_query
         tests: [not_null]
+      - name: observation_source
+        tests:
+          - accepted_values:
+              values: [amazon_sqp]
+      - name: observation_scope
+        tests:
+          - accepted_values:
+              values: [owned_product]
+      - name: observation_grain
+        tests:
+          - accepted_values:
+              values: [query_asin_rolling_window]
+      - name: window_start
+        tests: [not_null]
+      - name: window_end
+        tests: [not_null]
+      - name: source_loaded_at
+        tests: [not_null]
       - name: sqp_opportunity_score
         tests:
           - dbt_utils.accepted_range:
@@ -133,6 +151,20 @@ models:
       - name: tenant_id
         tests: [not_null]
       - name: search_term
+        tests: [not_null]
+      - name: observation_source
+        tests:
+          - accepted_values:
+              values: [amazon_ads]
+      - name: observation_scope
+        tests:
+          - accepted_values:
+              values: [owned_advertising]
+      - name: observation_grain
+        tests:
+          - accepted_values:
+              values: [search_term_campaign_ad_group_day]
+      - name: source_loaded_at
         tests: [not_null]
       - name: is_already_negative
         tests: [not_null]

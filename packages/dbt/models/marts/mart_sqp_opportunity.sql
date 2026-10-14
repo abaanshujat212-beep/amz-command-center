@@ -8,7 +8,10 @@ with sqp as (
         sum(clicks) as clicks_30d,
         sum(cart_adds) as cart_adds_30d,
         sum(purchases) as purchases_30d,
-        min(query_rank) as best_query_rank
+        min(query_rank) as best_query_rank,
+        min(report_date) as window_start,
+        max(report_date) as window_end,
+        max(loaded_at) as source_loaded_at
     from {{ ref('stg_sqp_query_snapshot') }}
     where report_date >= current_date - interval '30 days'
     group by 1, 2, 3
@@ -38,6 +41,12 @@ select
     s.cart_adds_30d,
     s.purchases_30d,
     s.best_query_rank,
+    'amazon_sqp'::text as observation_source,
+    'owned_product'::text as observation_scope,
+    'query_asin_rolling_window'::text as observation_grain,
+    s.window_start,
+    s.window_end,
+    s.source_loaded_at,
     case when s.impressions_30d > 0 then s.clicks_30d::numeric / s.impressions_30d end as query_ctr,
     case when s.clicks_30d > 0 then s.purchases_30d::numeric / s.clicks_30d end as query_cvr,
     coalesce(a.exists_as_exact, false) as exists_as_exact,
