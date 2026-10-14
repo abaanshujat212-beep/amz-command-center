@@ -10,6 +10,7 @@ from psycopg.types.json import Jsonb
 
 from services.notifications.policy import evaluate_delivery_policy, load_preference
 from services.notifications.provider_readiness import load_provider_ready
+from services.notifications.templates import load_approved_template
 
 ALLOWED_EVENT_TYPES = frozenset(
     {
@@ -97,12 +98,18 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
     """Persist policy outcomes; no provider or network call occurs."""
     for channel in ("in_app", "email", "whatsapp", "sms"):
         preference = load_preference(conn, event.tenant_id, event.event_type, channel)
+        template = (
+            True
+            if channel == "in_app"
+            else load_approved_template(conn, event.tenant_id, event.event_type, channel)
+        )
         decision = evaluate_delivery_policy(
             preference,
             event.occurred_at,
             event.severity,
             has_consent=False,
-            provider_configured=load_provider_ready(conn, event.tenant_id, channel),
+            provider_configured=bool(template)
+            and load_provider_ready(conn, event.tenant_id, channel),
             conn=conn,
             tenant_id=event.tenant_id,
             recipient_ref=event.recipient_ref,
@@ -116,6 +123,13 @@ def _wire_policy_decisions(conn, event: InternalEvent, event_id: str) -> None:
                 where tenant_id=%s and event_id=%s and channel=%s""",
             (decision.status, decision.eligible_at, event.tenant_id, event_id, channel),
         )
+        if template is not True and template is not None:
+            template_id = template["id"] if isinstance(template, dict) else template[0]
+            conn.execute(
+                """update notification_delivery set template_id=%s,updated_at=now()
+                    where tenant_id=%s and event_id=%s and channel=%s""",
+                (template_id, event.tenant_id, event_id, channel),
+            )
 
 
 def publish_in_app(conn, event: InternalEvent) -> PublishResult:
