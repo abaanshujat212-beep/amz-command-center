@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 
 import psycopg
 from psycopg.rows import dict_row
 
+from packages.shared.action_capabilities import capability
 from services.actions.human_control import active_control
 from services.rules import guardrails as gr
 from services.rules.compiler import (
@@ -30,6 +32,7 @@ from services.rules.freshness import resolve_source_freshness
 from services.rules.harvest import plan_harvest, record_lineage
 from services.rules.protections import active_protection
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
+from services.rules.recommendations import build_metadata, configuration_snapshots
 from services.rules.settings import load_tenant_guard_config
 
 
@@ -78,12 +81,21 @@ def evaluate_tenant(
     through: dt.date | None = None,
 ) -> RunSummary:
     now = now or dt.datetime.now(dt.timezone.utc)
+    started = time.monotonic()
     run_id = str(uuid.uuid4())
     s = RunSummary(run_id=run_id, tenant_id=tenant_id)
 
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant_id,))
         cfg = load_tenant_guard_config(cur, tenant_id)
+        objective_snapshot, strategy_snapshot, configuration_version = configuration_snapshots(cur, tenant_id)
+        cur.execute(
+            """insert into optimizer_run(id,tenant_id,run_key,engine_version,configuration_version,
+                   objective_snapshot,strategy_snapshot,started_at)
+               values(%s,%s,%s,'rules-engine-v1',%s,%s,%s,%s)
+               on conflict(tenant_id,run_key) do nothing""",
+            (run_id, tenant_id, run_id, configuration_version, json.dumps(objective_snapshot), json.dumps(strategy_snapshot), now),
+        )
         through = through or (now.date() - dt.timedelta(days=cfg.settlement_lag_days))
         changes_today, budget_today = _usage_today(cur, tenant_id)
 
@@ -244,11 +256,22 @@ def evaluate_tenant(
                 if harvest is not None:
                     reason = f"{reason} Routing: {harvest.routing_reason}"
 
+                metadata = build_metadata(
+                    action_type=action_type,
+                    lookback_days=rule["lookback_days"],
+                    metrics=metrics,
+                    blocked_by=decision.blocked_by.value if decision.blocked_by else None,
+                    objective_snapshot=objective_snapshot,
+                    strategy_snapshot=strategy_snapshot,
+                )
+                contract = metadata.as_dict()
+
                 cur.execute(
                     "insert into rule_evaluation (tenant_id, rule_id, run_id,"
                     " entity_type, entity_id, data_through, matched,"
-                    " metrics_snapshot, proposed_action, reason_text, blocked_by)"
-                    " values (%s,%s,%s,%s,%s,%s,true,%s,%s,%s,%s) returning id",
+                    " metrics_snapshot, proposed_action, reason_text, blocked_by,recommendation_type,"
+                    " confidence,risk,lookback_days,objective_snapshot,strategy_snapshot,economic_effect,expected_behavior)"
+                    " values (%s,%s,%s,%s,%s,%s,true,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id",
                     (
                         tenant_id,
                         rule["id"],
@@ -271,66 +294,71 @@ def evaluate_tenant(
                         ),
                         reason,
                         decision.blocked_by.value if decision.blocked_by else None,
+                        contract["recommendation_type"],
+                        contract["confidence"],
+                        contract["risk"],
+                        contract["lookback_days"],
+                        json.dumps(contract["objective_snapshot"], default=str),
+                        json.dumps(contract["strategy_snapshot"], default=str),
+                        json.dumps(contract["economic_effect"], default=str),
+                        json.dumps(contract["expected_behavior"], default=str),
                     ),
                 )
                 evaluation_id = cur.fetchone()["id"]
 
+                action_id = None
+
                 if not decision.allowed:
                     s.block(decision.blocked_by)
-                    continue
-
-                # Always queued as pending. Dry-run proposals are reviewable but
-                # can never be applied; that check lives in services/actions.
-                # Diagnostics are pending too: pending means "unread" for them,
-                # and 0006 forbids them from ever reaching 'applied'.
-                cur.execute(
-                    "insert into action (tenant_id, rule_id, evaluation_id,"
-                    " entity_type, entity_id, action_type, before_value,"
-                    " after_value, reason_text, clamped, clamp_note,"
-                    " idempotency_key) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-                    " on conflict (tenant_id, idempotency_key) do nothing returning id",
-                    (
-                        tenant_id,
-                        rule["id"],
-                        evaluation_id,
-                        rule["scope"],
-                        key[1],
-                        action_type,
-                        json.dumps({"value": current}),
-                        json.dumps(
-                            {"value": decision.value, "diagnostic": True}
-                            if diagnostic
-                            else {
-                                "value": decision.value,
-                                **(
-                                    {"destination": harvest.destination}
-                                    if harvest is not None
-                                    else {}
-                                ),
-                            }
-                        ),
-                        reason,
-                        decision.clamped,
-                        "; ".join(decision.notes) or None,
-                        f"{run_id}:{rule['code']}:{key[1]}",
-                    ),
-                )
-                if harvest is not None:
+                else:
+                    # Existing action remains the one authoritative approval queue.
+                    cur.execute(
+                        "insert into action (tenant_id, rule_id, evaluation_id,entity_type,entity_id,action_type,"
+                        " before_value,after_value,reason_text,clamped,clamp_note,idempotency_key,recommendation_type,"
+                        " confidence,risk,lookback_days,objective_snapshot,strategy_snapshot,economic_effect,expected_behavior)"
+                        " values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                        " on conflict (tenant_id,idempotency_key) do nothing returning id",
+                        (tenant_id,rule["id"],evaluation_id,rule["scope"],key[1],action_type,
+                         json.dumps({"value":current}),json.dumps({"value":decision.value,"diagnostic":True} if diagnostic else {"value":decision.value,**({"destination":harvest.destination} if harvest is not None else {})}),
+                         reason,decision.clamped,"; ".join(decision.notes) or None,f"{run_id}:{rule['code']}:{key[1]}",
+                         contract["recommendation_type"],contract["confidence"],contract["risk"],contract["lookback_days"],
+                         json.dumps(contract["objective_snapshot"],default=str),json.dumps(contract["strategy_snapshot"],default=str),
+                         json.dumps(contract["economic_effect"],default=str),json.dumps(contract["expected_behavior"],default=str)),
+                    )
                     queued = cur.fetchone()
-                    if queued is not None:
+                    action_id = queued["id"] if queued else None
+                    if harvest is not None and queued is not None:
                         record_lineage(
                             cur,
                             tenant_id=tenant_id,
                             run_id=run_id,
                             evaluation_id=evaluation_id,
-                            action_id=queued["id"],
+                            action_id=action_id,
                             plan=harvest,
                         )
-                if diagnostic:
-                    s.flagged += 1
-                else:
-                    claimed.add(key)
-                    s.proposed += 1
+                    if diagnostic:
+                        s.flagged += 1
+                    else:
+                        claimed.add(key)
+                        s.proposed += 1
+
+                metric_keys = sorted(k for k, value in metrics.items() if value is not None and k not in {"source_freshness","guardrail_context","harvest_routing"})
+                completeness = "complete" if freshness.usable and metrics.get("break_even_acos") is not None else "partial"
+                cur.execute(
+                    """insert into recommendation_evidence(tenant_id,optimizer_run_id,evaluation_id,action_id,
+                           evidence_kind,source_type,source_ref,observed_at,data_through,completeness,metric_keys,detail)
+                       values(%s,%s,%s,%s,'metric_snapshot','dbt_mart',%s,%s,%s,%s,%s,%s)""",
+                    (tenant_id,run_id,evaluation_id,action_id,f"{rule['scope']}:{freshness.data_through}",
+                     freshness.data_loaded_at or now,freshness.data_through,completeness,json.dumps(metric_keys),
+                     json.dumps({"blocked_by":decision.blocked_by.value if decision.blocked_by else None,"economics":contract["economic_effect"]},default=str)),
+                )
+                cur.execute(
+                    """insert into recommendation_evidence(tenant_id,optimizer_run_id,evaluation_id,action_id,
+                           evidence_kind,source_type,source_ref,observed_at,data_through,completeness,detail)
+                       values(%s,%s,%s,%s,'capability','capability_registry','action_capabilities:v1',%s,%s,'complete',%s)""",
+                    (tenant_id,run_id,evaluation_id,action_id,now,freshness.data_through,
+                     json.dumps(asdict(capability(rule["scope"],action_type)))),
+                )
 
         # Column names must match 0001_tenancy.sql: dataset (not pipeline),
         # rows_loaded, detail. Getting this wrong rolls back the entire run.
@@ -345,6 +373,15 @@ def evaluate_tenant(
                 s.proposed + s.flagged,
                 json.dumps(asdict(s), default=str),
             ),
+        )
+        finished = dt.datetime.now(dt.timezone.utc)
+        cur.execute(
+            """update optimizer_run set status=%s,entities_evaluated=%s,recommendations_emitted=%s,
+                   entities_skipped=%s,failures=%s,finished_at=%s,duration_ms=%s
+               where tenant_id=%s and id=%s and status='running'""",
+            ("partial" if s.errors else "succeeded",s.entities_evaluated,s.proposed+s.flagged,
+             max(0,s.entities_evaluated-s.matched)+sum(s.blocked.values()),len(s.errors),finished,
+             int((time.monotonic()-started)*1000),tenant_id,run_id),
         )
         conn.commit()
 

@@ -235,6 +235,27 @@ def test_profitable_keyword_produces_exactly_one_pending_action(conn, tenant):
     assert float(a["after_value"]["value"]) == pytest.approx(1.10)
     assert a["clamped"] is False
 
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("select set_tenant(%s)", (tenant,))
+        contract = cur.execute(
+            """select a.recommendation_type,a.confidence,a.risk,a.lookback_days,
+                      a.economic_effect,a.expected_behavior,r.status run_status,
+                      count(ev.id) evidence_count
+                 from action a join optimizer_run r on r.tenant_id=a.tenant_id
+                   and r.id=(select run_id from rule_evaluation where id=a.evaluation_id)
+                 join recommendation_evidence ev on ev.tenant_id=a.tenant_id and ev.action_id=a.id
+                where a.tenant_id=%s group by a.id,r.status""",
+            (tenant,),
+        ).fetchone()
+    assert contract["recommendation_type"] == "bid_adjustment"
+    assert contract["confidence"] > 0
+    assert contract["risk"] == "medium"
+    assert contract["lookback_days"] == 14
+    assert contract["economic_effect"]["status"] == "available"
+    assert contract["expected_behavior"]["requires_human_approval"] is True
+    assert contract["run_status"] == "succeeded"
+    assert contract["evidence_count"] == 2
+
 
 def test_rule_with_unknown_metric_is_disabled_not_retried(conn, tenant):
     now = dt.datetime.now(dt.timezone.utc)
@@ -257,6 +278,11 @@ def test_rule_with_unknown_metric_is_disabled_not_retried(conn, tenant):
         cur.execute("select set_tenant(%s)", (tenant,))
         cur.execute("select enabled from rule where id = %s", (rule_id,))
         assert cur.fetchone()["enabled"] is False
+        run = cur.execute(
+            "select status,failures from optimizer_run where tenant_id=%s and id=%s",
+            (tenant, summary.run_id),
+        ).fetchone()
+        assert run == {"status": "partial", "failures": 1}
 
 
 def test_higher_priority_rule_claims_the_entity(conn, tenant):
