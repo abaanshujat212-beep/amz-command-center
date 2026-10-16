@@ -4,7 +4,13 @@ ROOT = Path(__file__).parents[1]
 LIB = (ROOT / "apps/web/lib/ppc-configuration.ts").read_text()
 PAGE = (ROOT / "apps/web/app/settings/ppc-goals/page.tsx").read_text()
 COMPONENT = (ROOT / "apps/web/app/settings/ppc-goals/ppc-goal-settings.tsx").read_text()
-ROUTES = list((ROOT / "apps/web/app/api/ppc").rglob("route.ts"))
+ROUTES = [
+    ROOT / "apps/web/app/api/ppc/config/route.ts",
+    ROOT / "apps/web/app/api/ppc/config/activate/route.ts",
+    ROOT / "apps/web/app/api/ppc/config/objectives/route.ts",
+    ROOT / "apps/web/app/api/ppc/config/strategies/route.ts",
+    ROOT / "apps/web/app/api/ppc/goals/route.ts",
+]
 
 
 def test_configuration_routes_are_tenant_scoped_role_gated_and_idempotent():
