@@ -104,7 +104,8 @@ set search_path=public,pg_temp as $$ begin
   return new;
 end $$;
 create trigger optimizer_run_finalize_once before update on optimizer_run for each row execute function protect_optimizer_run();
-create trigger recommendation_evidence_immutable before update or delete on recommendation_evidence
+-- Application role has no DELETE grant; allow FK cascades for tenant erasure.
+create trigger recommendation_evidence_immutable before update on recommendation_evidence
 for each row execute function protect_research_evidence();
 
 create index recommendation_filter_idx on action(tenant_id,recommendation_type,status,risk,requested_at desc);
