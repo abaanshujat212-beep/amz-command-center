@@ -1,0 +1,2 @@
+import { withTenant } from "@/lib/db";import { ConfigurationInputError,createVersion } from "@/lib/ppc-configuration";import { currentContext } from "@/lib/session"
+export async function POST(req:Request){try{const a=await currentContext(),body=await req.json().catch(()=>({})),key=req.headers.get("idempotency-key")??"";return Response.json(await withTenant(a.tenantId,c=>createVersion(c,a.tenantId,a.userId,a.role,key,"objective",body)),{status:201})}catch(e){if(e instanceof ConfigurationInputError)return Response.json({error:e.message},{status:e.status});throw e}}
