@@ -1,0 +1,3 @@
+import { BudgetInputError,budgetAccess,createBudgetLimit,listBudgetLimits } from "@/lib/budget-governance";import { withTenant } from "@/lib/db";import { currentContext } from "@/lib/session"
+export async function GET(){const a=await currentContext();return Response.json(await withTenant(a.tenantId,async c=>({limits:await listBudgetLimits(c,a.tenantId),canWrite:await budgetAccess(c,a.tenantId,a.userId,a.role)})))}
+export async function POST(req:Request){try{const a=await currentContext(),body=await req.json().catch(()=>({}));return Response.json(await withTenant(a.tenantId,c=>createBudgetLimit(c,a.tenantId,a.userId,a.role,body)),{status:201})}catch(e){if(e instanceof BudgetInputError)return Response.json({error:e.message},{status:e.status});throw e}}
