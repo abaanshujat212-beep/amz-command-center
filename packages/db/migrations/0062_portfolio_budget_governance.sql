@@ -30,8 +30,9 @@ create function audit_portfolio_budget_limit() returns trigger language plpgsql 
   insert into portfolio_budget_limit_event(tenant_id,limit_id,actor_user_id,reason) values(new.tenant_id,new.id,new.created_by,new.reason); return new;
 end $$;
 create trigger portfolio_budget_limit_created after insert on portfolio_budget_limit for each row execute function audit_portfolio_budget_limit();
-create trigger portfolio_budget_limit_immutable before update or delete on portfolio_budget_limit for each row execute function protect_configuration_version();
-create trigger portfolio_budget_event_immutable before update or delete on portfolio_budget_limit_event for each row execute function protect_configuration_version();
+-- Application role has no DELETE grant. Permit FK cascades for tenant erasure.
+create trigger portfolio_budget_limit_immutable before update on portfolio_budget_limit for each row execute function protect_configuration_version();
+create trigger portfolio_budget_event_immutable before update on portfolio_budget_limit_event for each row execute function protect_configuration_version();
 do $$ declare t text; begin foreach t in array array['portfolio_budget_limit','portfolio_budget_limit_event'] loop
  execute format('alter table %I enable row level security',t); execute format('alter table %I force row level security',t);
  execute format('create policy tenant_isolation on %I using (tenant_id=nullif(current_setting(''app.tenant_id'',true),'''')::uuid) with check (tenant_id=nullif(current_setting(''app.tenant_id'',true),'''')::uuid)',t);

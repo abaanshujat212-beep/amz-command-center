@@ -6,7 +6,7 @@ DOWN=(ROOT/"packages/db/migrations/down/0062_portfolio_budget_governance.sql").r
 
 
 def test_schema_is_versioned_audited_immutable_and_tenant_isolated():
-    for fragment in ("version integer", "portfolio_budget_limit_event", "force row level security", "tenant_isolation", "before update or delete", "currency char(3)", "timezone text"):
+    for fragment in ("version integer", "portfolio_budget_limit_event", "force row level security", "tenant_isolation", "before update", "currency char(3)", "timezone text"):
         assert fragment in UP
     assert "drop table if exists portfolio_budget_limit" in DOWN
 
