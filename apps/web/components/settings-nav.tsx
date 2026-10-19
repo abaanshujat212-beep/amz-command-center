@@ -11,6 +11,7 @@ const sections = [
 	["/settings/protections", "Protected entities"],
 	["/settings/automation-control", "Automation control"],
 	["/settings/ppc-goals", "PPC objectives & goals"],
+	["/settings/scores", "PPC score formulas"],
 	["/settings/portfolio-budgets", "Portfolio budgets"],
 	["/settings/config-rollouts", "Config rollouts"],
 	["/settings/email", "Email services"], ["/settings/email-templates", "Email templates"], ["/settings/billing", "Billing"],
