@@ -11,6 +11,7 @@ from typing import Callable
 import psycopg
 from psycopg.rows import dict_row
 
+from services.actions.verification import run_once as run_verification_once
 from services.ingest.pipelines import ads_daily, sales_traffic
 from services.rules.runner import run_once as run_rules_once
 
@@ -282,15 +283,18 @@ def run_pipeline_cycle(
     run_ads: Callable[..., object] = ads_daily.run,
     run_sales: Callable[..., object] = sales_traffic.run,
     run_rules: Callable[..., object] = run_rules_once,
+    run_verification: Callable[..., object] | None = None,
 ) -> list[object]:
     results = run_ingestion(tenant_id, dry_run=dry_run, run_ads=run_ads, run_sales=run_sales)
     results.append(run_rules(tenant_id))
+    if run_verification is not None:
+        results.append(run_verification(tenant_id))
     return results
 
 
 def run_once(tenant_id: str, *, dry_run: bool = True, include_rules: bool = True) -> list[Alert]:
     if include_rules:
-        run_pipeline_cycle(tenant_id, dry_run=dry_run)
+        run_pipeline_cycle(tenant_id, dry_run=dry_run, run_verification=run_verification_once)
     else:
         run_ingestion(tenant_id, dry_run=dry_run)
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
