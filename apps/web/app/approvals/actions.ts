@@ -14,6 +14,8 @@ export async function approveAction(formData: FormData): Promise<void> {
 	void liveActionSupport
 	await decideAction({ tenantId, userId, role, actionId: String(formData.get("id")), decision: "approved" })
 	revalidatePath("/approvals")
+	revalidatePath("/recommendations")
+	revalidatePath(`/recommendations/${String(formData.get("id"))}`)
 	revalidatePath("/history")
 }
 
@@ -21,5 +23,7 @@ export async function rejectAction(formData: FormData): Promise<void> {
 	const { tenantId, userId, role } = await currentContext()
 	await decideAction({ tenantId, userId, role, actionId: String(formData.get("id")), decision: "rejected" })
 	revalidatePath("/approvals")
+	revalidatePath("/recommendations")
+	revalidatePath(`/recommendations/${String(formData.get("id"))}`)
 	revalidatePath("/history")
 }
