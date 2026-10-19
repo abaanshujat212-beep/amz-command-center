@@ -1,0 +1,2 @@
+import { BudgetInputError,checkBudget } from "@/lib/budget-governance";import { withTenant } from "@/lib/db";import { currentContext } from "@/lib/session"
+export async function POST(req:Request){try{const a=await currentContext(),body=await req.json().catch(()=>({}));return Response.json(await withTenant(a.tenantId,c=>checkBudget(c,a.tenantId,body)))}catch(e){if(e instanceof BudgetInputError)return Response.json({error:e.message},{status:e.status});throw e}}
