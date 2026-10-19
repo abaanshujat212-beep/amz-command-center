@@ -2,7 +2,15 @@ import datetime as dt
 
 from services.actions import state_machine as sm
 from services.actions.audit import EventType
-from services.actions.verification import MetricWindow, judge, placement_window, verify_action
+from services.actions.verification import (
+    ACTION_METRICS,
+    MetricWindow,
+    _mature,
+    judge,
+    placement_window,
+    verify_action,
+    verify_horizon,
+)
 
 
 class FakeConn:
@@ -89,3 +97,44 @@ def test_verify_action_persists_state_and_all_checkpoints(monkeypatch):
         "before_window_loaded",
         "after_window_loaded",
     ]
+
+
+def test_horizon_is_complete_only_with_every_settled_day():
+    end = dt.date(2026, 8, 8)
+    assert _mature(MetricWindow(1, 2, 10, 1, 7, end - dt.timedelta(days=1)), end - dt.timedelta(days=7), end)
+    assert not _mature(MetricWindow(1, 2, 10, 1, 6, end - dt.timedelta(days=1)), end - dt.timedelta(days=7), end)
+
+
+def test_action_specific_metrics_do_not_claim_unrelated_signals():
+    assert "cpc" in ACTION_METRICS["set_bid"]
+    assert "cpc" not in ACTION_METRICS["set_budget"]
+    assert ACTION_METRICS["pause"] == ("cost", "sales", "orders")
+
+
+def test_immature_horizon_persists_retryable_insufficient_data():
+    now = dt.datetime(2026, 8, 10, tzinfo=dt.timezone.utc)
+    action = sm.Action(id="a2", tenant_id="t1", entity_type="keyword", entity_id="k1",
+        action_type="set_bid", before_value={"value": 1}, after_value={"value": 1.1},
+        status=sm.Status.APPLIED, applied_at=now - dt.timedelta(days=3), idempotency_key="i2")
+    conn = FakeConn([
+        {"cost": 1, "sales": 2, "clicks": 10, "orders": 1, "observed_days": 3, "data_through": dt.date(2026, 8, 6)},
+        {"cost": 1, "sales": 2, "clicks": 10, "orders": 1, "observed_days": 2, "data_through": dt.date(2026, 8, 9)},
+    ])
+    assert verify_horizon(conn, action, 3, now=now) == "INSUFFICIENT_DATA"
+    assert conn.queries[-1][1][3] == "INSUFFICIENT_DATA"
+    assert conn.queries[-1][1][13] == "WINDOW_NOT_MATURE"
+
+
+def test_mature_horizon_is_complete_and_idempotent_upsert_is_scoped():
+    now = dt.datetime(2026, 8, 10, tzinfo=dt.timezone.utc)
+    action = sm.Action(id="a3", tenant_id="t1", entity_type="campaign", entity_id="c1",
+        action_type="set_budget", before_value={"value": 10}, after_value={"value": 12},
+        status=sm.Status.APPLIED, applied_at=now - dt.timedelta(days=3), idempotency_key="i3")
+    conn = FakeConn([
+        {"cost": 10, "sales": 20, "clicks": 20, "orders": 2, "observed_days": 3, "data_through": dt.date(2026, 8, 6)},
+        {"cost": 8, "sales": 20, "clicks": 20, "orders": 2, "observed_days": 3, "data_through": dt.date(2026, 8, 9)},
+    ])
+    assert verify_horizon(conn, action, 3, now=now) == "COMPLETE"
+    sql, params = conn.queries[-1]
+    assert "on conflict(tenant_id,action_id,horizon_days)" in sql
+    assert params[3:5] == ("COMPLETE", "improved")
