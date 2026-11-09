@@ -166,6 +166,28 @@ class AdsClient:
             body["campaignIdFilter"] = {"include": campaign_ids}
         return self._call("ads.campaigns.list", body=body)
 
+    def campaign_status(self, campaign_id: str) -> dict:
+        result = self.list_campaigns(campaign_ids=[campaign_id])
+        campaigns = result.get("campaigns") or result.get("campaignResponse") or []
+        for campaign in campaigns:
+            if str(campaign.get("campaignId")) == str(campaign_id):
+                state = campaign.get("state")
+                if state is None:
+                    raise RuntimeError(f"campaign {campaign_id} response did not include state")
+                return {"value": str(state).upper()}
+        raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
+
+    def update_campaign_status(self, campaign_id: str, status: str, *, dry_run: bool = True) -> dict:
+        normalized = status.strip().upper()
+        if normalized not in {"ENABLED", "PAUSED"}:
+            raise ValueError("campaign status must be ENABLED or PAUSED")
+        if dry_run:
+            return {"status": "WOULD_DO", "campaign_id": campaign_id, "state": normalized}
+        return self._call_mutating(
+            "ads.campaigns.update",
+            body={"campaigns": [{"campaignId": campaign_id, "state": normalized}]},
+        )
+
     def list_keywords(self, campaign_ids: list[str] | None = None, keyword_ids: list[str] | None = None) -> dict:
         body: dict = {"maxResults": 500}
         if campaign_ids:
