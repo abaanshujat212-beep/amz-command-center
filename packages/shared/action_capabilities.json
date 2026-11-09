@@ -22,7 +22,25 @@
     "approval_supported": false,
     "live_baseline_read_supported": true,
     "live_apply_supported": true,
-    "rollback_supported": false,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "campaign:pause": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "campaign:enable": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
     "verification_supported": true,
     "local_only": false
   },
