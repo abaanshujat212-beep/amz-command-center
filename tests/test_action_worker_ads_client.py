@@ -10,6 +10,7 @@ class FakeAds:
         self.calls = []
         self.credentials = SimpleNamespace(refresh_token="rotated-token")
         self.connection_id = "conn-1"
+        self.state = "ENABLED"
 
     def keyword_bid(self, keyword_id):
         self.calls.append(("read_bid", keyword_id))
@@ -23,6 +24,10 @@ class FakeAds:
         self.calls.append(("read_placement", campaign_id, placement))
         return {"value": 15.0, "placement": placement}
 
+    def campaign_status(self, campaign_id):
+        self.calls.append(("read_campaign_status", campaign_id))
+        return {"value": self.state}
+
     def update_bid(self, entity_id, new_bid, dry_run=True):
         self.calls.append(("bid", entity_id, new_bid, dry_run))
         return {"ok": True}
@@ -33,6 +38,10 @@ class FakeAds:
 
     def update_placement_modifier(self, campaign_id, placement, new_percentage, current_percentage, dry_run=True):
         self.calls.append(("placement", campaign_id, placement, new_percentage, current_percentage, dry_run))
+        return {"ok": True}
+
+    def update_campaign_status(self, campaign_id, status, dry_run=True):
+        self.calls.append(("campaign_status", campaign_id, status, dry_run))
         return {"ok": True}
 
 
@@ -114,6 +123,56 @@ def test_ads_action_client_applies_placement_modifier():
     a.after_value = {"value": 30, "placement": "PLACEMENT_TOP"}
     live_client(ads).apply(a)
     assert ads.calls == [("placement", "c1", "PLACEMENT_TOP", 30.0, 1.0, False)]
+
+
+def test_ads_action_client_rolls_back_placement_modifier_using_live_current_value():
+    ads = FakeAds()
+    a = action("set_placement_modifier", "campaign")
+    a.entity_id = "c1"
+    a.before_value = {"value": 15.0, "placement": "PLACEMENT_TOP"}
+    a.after_value = {"value": 30.0, "placement": "PLACEMENT_TOP"}
+
+    result = live_client(ads).rollback(a)
+
+    assert result == {"ok": True}
+    assert ads.calls == [
+        ("read_placement", "c1", "PLACEMENT_TOP"),
+        ("placement", "c1", "PLACEMENT_TOP", 15.0, 15.0, False),
+    ]
+
+
+def test_ads_action_client_does_not_rollback_placement_without_current_value():
+    ads = FakeAds()
+    ads.placement_modifier = lambda campaign_id, placement: {"value": None, "placement": placement}
+    a = action("set_placement_modifier", "campaign")
+    a.entity_id = "c1"
+    a.before_value = {"value": 15.0, "placement": "PLACEMENT_TOP"}
+    a.after_value = {"value": 30.0, "placement": "PLACEMENT_TOP"}
+
+    try:
+        live_client(ads).rollback(a)
+    except RuntimeError as exc:
+        assert "current value is unavailable" in str(exc)
+    else:
+        raise AssertionError("rollback should fail closed without a live current value")
+
+
+def test_campaign_pause_reads_applies_and_restores_live_state():
+    ads = FakeAds()
+    a = action("pause", "campaign")
+    a.entity_id = "c1"
+    a.before_value = {"value": "ENABLED"}
+    a.after_value = {"value": "PAUSED"}
+    client = live_client(ads)
+
+    assert client.read_before_value(a) == {"value": "ENABLED"}
+    assert client.apply(a) == {"ok": True}
+    assert client.rollback(a) == {"ok": True}
+    assert ads.calls == [
+        ("read_campaign_status", "c1"),
+        ("campaign_status", "c1", "PAUSED", False),
+        ("campaign_status", "c1", "ENABLED", False),
+    ]
 
 
 def test_persist_rotated_refresh_token_writes_ciphertext(monkeypatch):

@@ -46,12 +46,19 @@ def test_worker_requires_both_supported_phase_and_authorized_readiness():
     )
 
 
-def test_incomplete_rollback_fails_closed():
-    with pytest.raises(RuntimeError, match="unsupported capability"):
+def test_placement_rollback_requires_authorized_live_evidence():
+    assert_worker_capability(
+        "campaign",
+        "set_placement_modifier",
+        phase="rollback",
+        readiness_state="LIVE_READY",
+        verification_level="AUTHORIZED_LIVE_WRITE",
+    )
+    with pytest.raises(RuntimeError, match="not LIVE_READY"):
         assert_worker_capability(
             "campaign",
             "set_placement_modifier",
             phase="rollback",
             readiness_state="LIVE_READY",
-            verification_level="AUTHORIZED_LIVE_WRITE",
+            verification_level="STATIC_CONTRACT",
         )
