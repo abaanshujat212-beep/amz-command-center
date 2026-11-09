@@ -75,6 +75,31 @@ def test_target_bid_never_uses_keyword_endpoint(monkeypatch):
     assert all("keywords" not in endpoint for endpoint, _ in calls)
 
 
+def test_campaign_status_read_and_update_use_campaign_contract(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.campaigns.list":
+            return {"campaigns": [{"campaignId": "c-1", "state": "enabled"}]}
+        return {"ok": True}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    assert c.campaign_status("c-1") == {"value": "ENABLED"}
+    assert c.update_campaign_status("c-1", "PAUSED", dry_run=False) == {"ok": True}
+    assert calls == [
+        ("ads.campaigns.list", {"maxResults": 500, "campaignIdFilter": {"include": ["c-1"]}}),
+        ("ads.campaigns.update", {"campaigns": [{"campaignId": "c-1", "state": "PAUSED"}]}),
+    ]
+
+
+def test_campaign_status_update_rejects_unknown_states():
+    with pytest.raises(ValueError, match="ENABLED or PAUSED"):
+        client().update_campaign_status("c-1", "ARCHIVED", dry_run=False)
+
+
 def test_call_retries_429_retry_after(monkeypatch):
     responses = [
         response(429, headers={"Retry-After": "0"}),
