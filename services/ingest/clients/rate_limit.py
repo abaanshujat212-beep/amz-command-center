@@ -139,7 +139,15 @@ def backoff_sleep(attempt: int, retry_after: float | None = None) -> float:
 
 MAX_ATTEMPTS = 6
 
-# Report creation must NOT be retried blindly: each attempt consumes a scarce
-# slot (one per 45s) and may leave a duplicate report queued. Retry the poll and
-# the download, not the creation.
-NON_RETRYABLE_ENDPOINTS = frozenset({"sp.reports.create", "ads.reports.create"})
+# Creation requests must not be retried blindly: a response can be lost after
+# the provider accepts the request, leaving duplicate reports or entities.
+# Retry report polls and reads; re-evaluate entity creation after an ambiguous
+# transport/provider result instead of replaying it.
+NON_RETRYABLE_ENDPOINTS = frozenset(
+    {
+        "sp.reports.create",
+        "ads.reports.create",
+        "ads.keywords.create",
+        "ads.negativeKeywords.create",
+    }
+)

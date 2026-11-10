@@ -27,6 +27,26 @@
     "local_only": false,
     "confirmation_phrase": "CREATE KEYWORD"
   },
+  "search_term:add_negative_exact": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": false,
+    "verification_supported": true,
+    "local_only": false,
+    "confirmation_phrase": "ADD NEGATIVE EXACT"
+  },
+  "search_term:add_negative_phrase": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": false,
+    "verification_supported": true,
+    "local_only": false,
+    "confirmation_phrase": "ADD NEGATIVE PHRASE"
+  },
   "campaign:set_placement_modifier": {
     "recommendation_supported": true,
     "approval_supported": false,

@@ -85,6 +85,16 @@ class AdsActionClient:
             if self.ads.exact_keyword_exists(ad_group_id, action.entity_id):
                 raise RuntimeError("exact keyword already exists in destination ad group")
             return None
+        if action.action_type in {"add_negative_exact", "add_negative_phrase"} and action.entity_type == "search_term":
+            destination = action.after_value.get("destination") or {}
+            campaign_id = str(destination.get("campaign_id") or "")
+            ad_group_id = str(destination.get("ad_group_id") or "") or None
+            match_type = "EXACT" if action.action_type == "add_negative_exact" else "PHRASE"
+            if not campaign_id:
+                raise RuntimeError("negative keyword requires an explicit campaign destination")
+            if self.ads.negative_keyword_exists(campaign_id, ad_group_id, action.entity_id):
+                raise RuntimeError("duplicate or conflicting negative keyword exists at destination")
+            return None
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
@@ -119,6 +129,19 @@ class AdsActionClient:
                 keyword_text=action.entity_id,
                 match_type="EXACT",
                 bid=float(value),
+                dry_run=False,
+            )
+        if action.action_type in {"add_negative_exact", "add_negative_phrase"} and action.entity_type == "search_term":
+            phrase = required_confirmation(action.entity_type, action.action_type)
+            if phrase and action.approval_confirmation != phrase:
+                raise RuntimeError("negative keyword creation requires explicit approval confirmation")
+            destination = action.after_value.get("destination") or {}
+            match_type = "EXACT" if action.action_type == "add_negative_exact" else "PHRASE"
+            return self.ads.create_negative_keyword(
+                campaign_id=str(destination.get("campaign_id") or ""),
+                ad_group_id=str(destination.get("ad_group_id") or "") or None,
+                keyword_text=action.entity_id,
+                match_type=match_type,
                 dry_run=False,
             )
         if action.action_type == "set_placement_modifier":

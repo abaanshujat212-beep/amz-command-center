@@ -23,9 +23,17 @@ class FakeAds:
         self.calls.append(("keyword_exists", ad_group_id, keyword_text))
         return False
 
+    def negative_keyword_exists(self, campaign_id, ad_group_id, keyword_text):
+        self.calls.append(("negative_exists", campaign_id, ad_group_id, keyword_text))
+        return False
+
     def create_keyword(self, **kwargs):
         self.exact_keyword_exists(kwargs["ad_group_id"], kwargs["keyword_text"])
         self.calls.append(("create_keyword", kwargs))
+        return {"ok": True}
+
+    def create_negative_keyword(self, **kwargs):
+        self.calls.append(("create_negative_keyword", kwargs))
         return {"ok": True}
 
     def target_bid(self, target_id):
@@ -100,7 +108,11 @@ def action(action_type="set_bid", entity_type="keyword"):
         after_value={"value": 1.25},
         status=sm.Status.APPROVED,
         approved_at=dt.datetime.now(dt.timezone.utc),
-        approval_confirmation="CREATE KEYWORD" if action_type == "create_keyword" else None,
+        approval_confirmation={
+            "create_keyword": "CREATE KEYWORD",
+            "add_negative_exact": "ADD NEGATIVE EXACT",
+            "add_negative_phrase": "ADD NEGATIVE PHRASE",
+        }.get(action_type),
     )
 
 
@@ -311,6 +323,49 @@ def test_campaign_budget_drift_blocks_write_before_apply():
     assert updated.error.startswith("drift:")
     assert response is None
     assert ads.calls == [("read_campaign_budget", "c1")]
+
+
+@pytest.mark.parametrize(
+    ("action_type", "match_type", "confirmation"),
+    [
+        ("add_negative_exact", "EXACT", "ADD NEGATIVE EXACT"),
+        ("add_negative_phrase", "PHRASE", "ADD NEGATIVE PHRASE"),
+    ],
+)
+def test_negative_keyword_requires_explicit_destination_duplicate_preflight_and_confirmation(
+    action_type, match_type, confirmation
+):
+    ads = FakeAds()
+    a = action(action_type, "search_term")
+    a.entity_id = "bad query"
+    a.approval_confirmation = confirmation
+    a.after_value["destination"] = {"campaign_id": "c1", "ad_group_id": "g1"}
+    client = live_client(ads)
+    assert client.read_before_value(a) is None
+    assert client.apply(a) == {"ok": True}
+    assert ads.calls == [
+        ("negative_exists", "c1", "g1", "bad query"),
+        (
+            "create_negative_keyword",
+            {
+                "campaign_id": "c1",
+                "ad_group_id": "g1",
+                "keyword_text": "bad query",
+                "match_type": match_type,
+                "dry_run": False,
+            },
+        ),
+    ]
+
+
+def test_negative_keyword_without_confirmation_fails_before_write():
+    ads = FakeAds()
+    a = action("add_negative_exact", "search_term")
+    a.approval_confirmation = None
+    a.after_value["destination"] = {"campaign_id": "c1", "ad_group_id": "g1"}
+    with pytest.raises(RuntimeError, match="explicit approval confirmation"):
+        live_client(ads).apply(a)
+    assert ads.calls == []
 
 
 def test_ad_group_default_bid_reads_applies_and_restores_live_value():

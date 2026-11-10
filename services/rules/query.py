@@ -92,6 +92,10 @@ _SCOPE_AGG: dict[str, str] = {
     """,
     "search_term": """
         max(bid)                                  as bid,
+        min(campaign_id)::text                   as source_campaign_id,
+        min(ad_group_id)::text                   as source_ad_group_id,
+        count(distinct campaign_id)              as source_campaign_count,
+        count(distinct ad_group_id)              as source_ad_group_count,
         bool_or(is_already_negative)              as is_already_negative,
         bool_or(exists_as_exact)                  as exists_as_exact,
         null::numeric                             as budget_amount,
