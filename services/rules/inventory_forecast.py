@@ -196,8 +196,13 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
         points.append((day, day_demand, max(0.0, projected)))
 
     days_supply = available / average if average > 0 else None
-    lead_demand = sum(point[1] for point in points)
-    available_at_lead = max(0.0, available + sum(receipts.values()) - lead_demand)
+    lead_demand = sum(point[1] for point in points[:lead_days])
+    lead_day = inputs.as_of.fromordinal(inputs.as_of.toordinal() + lead_days)
+    receipts_by_lead = sum(
+        quantity for arrival, quantity in receipts.items()
+        if inputs.as_of < arrival <= lead_day
+    )
+    available_at_lead = max(0.0, available + receipts_by_lead - lead_demand)
     # Replenish projected lead-time stock up to one lead-time of safety stock.
     safety_stock = average * lead
     reorder_quantity = max(0.0, safety_stock - available_at_lead)

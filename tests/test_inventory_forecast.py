@@ -114,3 +114,34 @@ def test_duplicate_history_dates_and_invalid_receipts_are_reported():
     ))
     assert bad_receipt.status == "blocked"
     assert "invalid_expected_receipt" in bad_receipt.blockers
+
+
+@pytest.mark.parametrize("arrival_offset", [0, 5, 30])
+def test_receipts_outside_lead_time_do_not_inflate_lead_time_stock(arrival_offset):
+    result = forecast_inventory(fixture(
+        available=10, demand=5, lead=4,
+        receipts=(ExpectedReceipt(AS_OF + timedelta(days=arrival_offset), 100),),
+    ))
+    assert result.projected_available_at_lead_time == 0
+    assert result.reorder_quantity == 20
+    assert result.forecast[-1][2] == result.projected_available_at_lead_time
+
+
+def test_receipt_on_lead_time_boundary_counts_in_projected_stock():
+    result = forecast_inventory(fixture(
+        available=10, demand=5, lead=4,
+        receipts=(ExpectedReceipt(AS_OF + timedelta(days=4), 100),),
+    ))
+    assert result.projected_available_at_lead_time == 90
+    assert result.forecast[-1][2] == 90
+    assert result.reorder_quantity == 0
+
+
+def test_zero_lead_time_preserves_current_stock_without_future_demand_or_receipts():
+    result = forecast_inventory(fixture(
+        available=10, demand=5, lead=0,
+        receipts=(ExpectedReceipt(AS_OF + timedelta(days=1), 100),),
+    ))
+    assert result.projected_available_at_lead_time == 10
+    assert result.projected_excess_at_lead_time == 10
+    assert result.reorder_quantity == 0
