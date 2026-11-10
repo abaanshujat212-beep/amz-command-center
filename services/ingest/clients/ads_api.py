@@ -177,6 +177,22 @@ class AdsClient:
                 return {"value": str(state).upper()}
         raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
 
+    def campaign_budget(self, campaign_id: str) -> dict:
+        result = self.list_campaigns(campaign_ids=[campaign_id])
+        campaigns = result.get("campaigns") or result.get("campaignResponse") or []
+        for campaign in campaigns:
+            if str(campaign.get("campaignId")) != str(campaign_id):
+                continue
+            budget = campaign.get("budget")
+            if isinstance(budget, dict):
+                value = budget.get("budget")
+            else:
+                value = budget
+            if value is None:
+                raise RuntimeError(f"campaign {campaign_id} response did not include budget")
+            return {"value": float(value)}
+        raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
+
     def update_campaign_status(self, campaign_id: str, status: str, *, dry_run: bool = True) -> dict:
         normalized = status.strip().upper()
         if normalized not in {"ENABLED", "PAUSED"}:
@@ -186,6 +202,17 @@ class AdsClient:
         return self._call_mutating(
             "ads.campaigns.update",
             body={"campaigns": [{"campaignId": campaign_id, "state": normalized}]},
+        )
+
+    def update_campaign_budget(self, campaign_id: str, budget: float, *, dry_run: bool = True) -> dict:
+        amount = float(budget)
+        if amount <= 0:
+            raise ValueError("campaign budget must be greater than zero")
+        if dry_run:
+            return {"status": "WOULD_DO", "campaign_id": campaign_id, "budget": amount}
+        return self._call_mutating(
+            "ads.campaigns.update",
+            body={"campaigns": [{"campaignId": campaign_id, "budget": {"budget": amount}}]},
         )
 
     def list_keywords(self, campaign_ids: list[str] | None = None, keyword_ids: list[str] | None = None) -> dict:
