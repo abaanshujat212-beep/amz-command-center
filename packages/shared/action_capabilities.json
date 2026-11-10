@@ -53,6 +53,69 @@
     "verification_supported": true,
     "local_only": false
   },
+  "ad_group:set_bid": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "ad_group:pause": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "ad_group:enable": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "keyword:pause": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "keyword:enable": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "target:pause": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
+  "target:enable": {
+    "recommendation_supported": true,
+    "approval_supported": true,
+    "live_baseline_read_supported": true,
+    "live_apply_supported": true,
+    "rollback_supported": true,
+    "verification_supported": true,
+    "local_only": false
+  },
   "*:flag": {
     "recommendation_supported": true,
     "approval_supported": false,
