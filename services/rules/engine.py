@@ -261,6 +261,11 @@ def evaluate_tenant(
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
+                metrics["freshness_days"] = (
+                    max(0.0, (now - freshness.data_loaded_at).total_seconds() / 86400)
+                    if freshness.data_loaded_at is not None
+                    else None
+                )
                 metrics["guardrail_context"] = build_guardrail_context(
                     entities_evaluated=len(rows),
                     entities_matched=len(matched),
@@ -381,7 +386,9 @@ def evaluate_tenant(
                        values(%s,%s,%s,%s,'metric_snapshot','dbt_mart',%s,%s,%s,%s,%s,%s)""",
                     (tenant_id,run_id,evaluation_id,action_id,f"{rule['scope']}:{freshness.data_through}",
                      freshness.data_loaded_at or now,freshness.data_through,completeness,json.dumps(metric_keys),
-                     json.dumps({"blocked_by":decision.blocked_by.value if decision.blocked_by else None,"economics":contract["economic_effect"]},default=str)),
+                     json.dumps({"blocked_by":decision.blocked_by.value if decision.blocked_by else None,
+                                 "economics":contract["economic_effect"],
+                                 "confidence":contract["confidence_evidence"]},default=str)),
                 )
                 cur.execute(
                     """insert into recommendation_evidence(tenant_id,optimizer_run_id,evaluation_id,action_id,

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from services.rules.confidence import score_recommendation_confidence
+
 TAXONOMY = {
     "set_bid": "bid_adjustment",
     "set_budget": "budget_adjustment",
@@ -39,6 +41,7 @@ class RecommendationMetadata:
     strategy_snapshot: dict[str, Any]
     economic_effect: dict[str, Any]
     expected_behavior: dict[str, Any]
+    confidence_evidence: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -57,8 +60,19 @@ def build_metadata(
         raise ValueError(f"unsupported recommendation action: {action_type}")
     clicks = max(0, int(metrics.get("clicks") or 0))
     impressions = max(0, int(metrics.get("impressions") or 0))
-    # Placeholder policy is explicit and deterministic; it is not model confidence.
-    confidence = 0.0 if blocked_by else min(0.9, 0.5 + min(clicks / 100, 0.2) + min(impressions / 10000, 0.2))
+    confidence_evidence = score_recommendation_confidence(
+        clicks=clicks,
+        impressions=impressions,
+        freshness_days=metrics.get("freshness_days"),
+        volatility_cpc_cv=metrics.get("volatility_cpc_cv"),
+        variance_cv=metrics.get("performance_variance_cv"),
+        evidence_complete=(
+            metrics.get("break_even_acos") is not None and metrics.get("freshness_days") is not None
+        ),
+    )
+    # The persisted contract stores confidence in [0,1]; retain the 0-100
+    # score and its components for explainability in recommendation evidence.
+    confidence = 0.0 if blocked_by else confidence_evidence.score / 100
     break_even = metrics.get("break_even_acos")
     economics = {
         "status": "available" if break_even is not None else "missing",
@@ -77,9 +91,10 @@ def build_metadata(
         {
             "action_type": action_type,
             "direction": "diagnostic" if action_type == "flag" else "change",
-            "requires_human_approval": action_type != "flag",
+            "requires_human_approval": action_type != "flag" or confidence_evidence.score < 75,
             "blocked_by": blocked_by,
         },
+        confidence_evidence.as_dict(),
     )
 
 
@@ -97,6 +112,14 @@ def configuration_snapshots(cur, tenant_id: str) -> tuple[dict[str, Any], dict[s
     if not row:
         missing = {"status": "not_configured"}
         return missing, missing, "unconfigured"
-    objective = {key.removeprefix("objective_"): value for key, value in row.items() if key.startswith("objective_")}
-    strategy = {key.removeprefix("strategy_"): value for key, value in row.items() if key.startswith("strategy_")}
+    objective = {
+        key.removeprefix("objective_"): value
+        for key, value in row.items()
+        if key.startswith("objective_")
+    }
+    strategy = {
+        key.removeprefix("strategy_"): value
+        for key, value in row.items()
+        if key.startswith("strategy_")
+    }
     return objective, strategy, f"objective:{objective['id']}/strategy:{strategy['id']}"
