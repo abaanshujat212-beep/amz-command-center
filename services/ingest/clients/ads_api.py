@@ -166,6 +166,12 @@ class AdsClient:
             body["campaignIdFilter"] = {"include": campaign_ids}
         return self._call("ads.campaigns.list", body=body)
 
+    def list_ad_groups(self, ad_group_ids: list[str] | None = None) -> dict:
+        body: dict = {"maxResults": 500}
+        if ad_group_ids:
+            body["adGroupIdFilter"] = {"include": ad_group_ids}
+        return self._call("ads.adGroups.list", body=body)
+
     def campaign_status(self, campaign_id: str) -> dict:
         result = self.list_campaigns(campaign_ids=[campaign_id])
         campaigns = result.get("campaigns") or result.get("campaignResponse") or []
@@ -228,6 +234,66 @@ class AdsClient:
         if target_ids:
             body["targetIdFilter"] = {"include": target_ids}
         return self._call("ads.targets.list", body=body)
+
+    @staticmethod
+    def _read_entity_state(rows: list[dict], entity_id: str, id_field: str, kind: str) -> dict:
+        for row in rows:
+            if str(row.get(id_field)) == str(entity_id):
+                state = row.get("state")
+                if state is None:
+                    raise RuntimeError(f"{kind} {entity_id} response did not include state")
+                return {"value": str(state).upper()}
+        raise RuntimeError(f"{kind} {entity_id} was not returned by Ads API")
+
+    def entity_status(self, entity_type: str, entity_id: str) -> dict:
+        if entity_type == "campaign":
+            return self.campaign_status(entity_id)
+        if entity_type == "ad_group":
+            result = self.list_ad_groups(ad_group_ids=[entity_id])
+            return self._read_entity_state(result.get("adGroups") or result.get("adGroupResponse") or [], entity_id, "adGroupId", "ad group")
+        if entity_type == "keyword":
+            result = self.list_keywords(keyword_ids=[entity_id])
+            return self._read_entity_state(result.get("keywords") or result.get("keywordResponse") or [], entity_id, "keywordId", "keyword")
+        if entity_type == "target":
+            result = self.list_targets(target_ids=[entity_id])
+            return self._read_entity_state(result.get("targets") or result.get("targetingClauses") or [], entity_id, "targetId", "target")
+        raise ValueError(f"unsupported status entity type: {entity_type}")
+
+    def update_entity_status(self, entity_type: str, entity_id: str, state: str, *, dry_run: bool = True) -> dict:
+        normalized = state.strip().upper()
+        if normalized not in {"ENABLED", "PAUSED"}:
+            raise ValueError("entity state must be ENABLED or PAUSED")
+        fields = {
+            "campaign": ("ads.campaigns.update", "campaigns", "campaignId"),
+            "ad_group": ("ads.adGroups.update", "adGroups", "adGroupId"),
+            "keyword": ("ads.keywords.update", "keywords", "keywordId"),
+            "target": ("ads.targets.update", "targetingClauses", "targetId"),
+        }
+        if entity_type not in fields:
+            raise ValueError(f"unsupported status entity type: {entity_type}")
+        endpoint, collection, id_field = fields[entity_type]
+        if dry_run:
+            return {"status": "WOULD_DO", "entity_type": entity_type, "entity_id": entity_id, "state": normalized}
+        return self._call_mutating(endpoint, body={collection: [{id_field: entity_id, "state": normalized}]})
+
+    def ad_group_default_bid(self, ad_group_id: str) -> dict:
+        result = self.list_ad_groups(ad_group_ids=[ad_group_id])
+        rows = result.get("adGroups") or result.get("adGroupResponse") or []
+        for row in rows:
+            if str(row.get("adGroupId")) == str(ad_group_id):
+                value = row.get("defaultBid", row.get("bid"))
+                if value is None:
+                    raise RuntimeError(f"ad group {ad_group_id} response did not include default bid")
+                return {"value": float(value)}
+        raise RuntimeError(f"ad group {ad_group_id} was not returned by Ads API")
+
+    def update_ad_group_default_bid(self, ad_group_id: str, bid: float, *, dry_run: bool = True) -> dict:
+        amount = float(bid)
+        if amount <= 0:
+            raise ValueError("ad group default bid must be greater than zero")
+        if dry_run:
+            return {"status": "WOULD_DO", "ad_group_id": ad_group_id, "bid": amount}
+        return self._call_mutating("ads.adGroups.update", body={"adGroups": [{"adGroupId": ad_group_id, "defaultBid": amount}]})
 
     def keyword_bid(self, keyword_id: str) -> dict:
         result = self.list_keywords(keyword_ids=[keyword_id])
