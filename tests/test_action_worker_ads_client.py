@@ -32,6 +32,14 @@ class FakeAds:
         self.calls.append(("read_campaign_budget", campaign_id))
         return {"value": 20.0}
 
+    def entity_status(self, entity_type, entity_id):
+        self.calls.append(("read_entity_status", entity_type, entity_id))
+        return {"value": "ENABLED"}
+
+    def ad_group_default_bid(self, ad_group_id):
+        self.calls.append(("read_ad_group_bid", ad_group_id))
+        return {"value": 0.75}
+
     def update_bid(self, entity_id, new_bid, dry_run=True):
         self.calls.append(("bid", entity_id, new_bid, dry_run))
         return {"ok": True}
@@ -50,6 +58,14 @@ class FakeAds:
 
     def update_campaign_budget(self, campaign_id, budget, dry_run=True):
         self.calls.append(("campaign_budget", campaign_id, budget, dry_run))
+        return {"ok": True}
+
+    def update_entity_status(self, entity_type, entity_id, state, dry_run=True):
+        self.calls.append(("entity_status", entity_type, entity_id, state, dry_run))
+        return {"ok": True}
+
+    def update_ad_group_default_bid(self, ad_group_id, bid, dry_run=True):
+        self.calls.append(("ad_group_bid", ad_group_id, bid, dry_run))
         return {"ok": True}
 
 
@@ -177,9 +193,9 @@ def test_campaign_pause_reads_applies_and_restores_live_state():
     assert client.apply(a) == {"ok": True}
     assert client.rollback(a) == {"ok": True}
     assert ads.calls == [
-        ("read_campaign_status", "c1"),
-        ("campaign_status", "c1", "PAUSED", False),
-        ("campaign_status", "c1", "ENABLED", False),
+        ("read_entity_status", "campaign", "c1"),
+        ("entity_status", "campaign", "c1", "PAUSED", False),
+        ("entity_status", "campaign", "c1", "ENABLED", False),
     ]
 
 
@@ -198,6 +214,41 @@ def test_campaign_budget_reads_applies_and_restores_live_value():
         ("read_campaign_budget", "c1"),
         ("campaign_budget", "c1", 24.0, False),
         ("campaign_budget", "c1", 20.0, False),
+    ]
+
+
+def test_ad_group_default_bid_reads_applies_and_restores_live_value():
+    ads = FakeAds()
+    a = action("set_bid", "ad_group")
+    a.entity_id = "g1"
+    a.before_value = {"value": 0.75}
+    a.after_value = {"value": 0.9}
+    client = live_client(ads)
+
+    assert client.read_before_value(a) == {"value": 0.75}
+    assert client.apply(a) == {"ok": True}
+    assert client.rollback(a) == {"ok": True}
+    assert ads.calls == [
+        ("read_ad_group_bid", "g1"),
+        ("ad_group_bid", "g1", 0.9, False),
+        ("ad_group_bid", "g1", 0.75, False),
+    ]
+
+
+def test_keyword_status_reads_applies_and_restores_live_state():
+    ads = FakeAds()
+    a = action("pause", "keyword")
+    a.before_value = {"value": "ENABLED"}
+    a.after_value = {"value": "PAUSED"}
+    client = live_client(ads)
+
+    assert client.read_before_value(a) == {"value": "ENABLED"}
+    assert client.apply(a) == {"ok": True}
+    assert client.rollback(a) == {"ok": True}
+    assert ads.calls == [
+        ("read_entity_status", "keyword", "k1"),
+        ("entity_status", "keyword", "k1", "PAUSED", False),
+        ("entity_status", "keyword", "k1", "ENABLED", False),
     ]
 
 

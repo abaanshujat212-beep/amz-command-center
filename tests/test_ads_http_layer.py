@@ -115,6 +115,46 @@ def test_campaign_budget_read_and_update_use_campaign_contract(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize(
+    ("entity_type", "entity_id", "list_endpoint", "rows", "expected_update"),
+    [
+        ("ad_group", "g-1", "ads.adGroups.list", {"adGroups": [{"adGroupId": "g-1", "state": "paused"}]}, ("ads.adGroups.update", {"adGroups": [{"adGroupId": "g-1", "state": "ENABLED"}]})),
+        ("keyword", "k-1", "ads.keywords.list", {"keywords": [{"keywordId": "k-1", "state": "enabled"}]}, ("ads.keywords.update", {"keywords": [{"keywordId": "k-1", "state": "ENABLED"}]})),
+        ("target", "t-1", "ads.targets.list", {"targets": [{"targetId": "t-1", "state": "paused"}]}, ("ads.targets.update", {"targetingClauses": [{"targetId": "t-1", "state": "ENABLED"}]})),
+    ],
+)
+def test_entity_status_read_and_update_contract(monkeypatch, entity_type, entity_id, list_endpoint, rows, expected_update):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        return rows if endpoint == list_endpoint else {"ok": True}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    assert c.entity_status(entity_type, entity_id) == {"value": rows[next(iter(rows))][0]["state"].upper()}
+    assert c.update_entity_status(entity_type, entity_id, "ENABLED", dry_run=False) == {"ok": True}
+    assert calls[-1] == expected_update
+
+
+def test_ad_group_default_bid_read_and_update_contract(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.adGroups.list":
+            return {"adGroups": [{"adGroupId": "g-1", "defaultBid": 0.75}]}
+        return {"ok": True}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    assert c.ad_group_default_bid("g-1") == {"value": 0.75}
+    assert c.update_ad_group_default_bid("g-1", 0.9, dry_run=False) == {"ok": True}
+    assert calls[-1] == ("ads.adGroups.update", {"adGroups": [{"adGroupId": "g-1", "defaultBid": 0.9}]})
+
+
 def test_campaign_status_update_rejects_unknown_states():
     with pytest.raises(ValueError, match="ENABLED or PAUSED"):
         client().update_campaign_status("c-1", "ARCHIVED", dry_run=False)
