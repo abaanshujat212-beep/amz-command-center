@@ -149,5 +149,6 @@ NON_RETRYABLE_ENDPOINTS = frozenset(
         "ads.reports.create",
         "ads.keywords.create",
         "ads.negativeKeywords.create",
+        "ads.negativeTargets.create",
     }
 )

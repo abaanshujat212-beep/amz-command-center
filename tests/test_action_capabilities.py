@@ -23,6 +23,16 @@ def test_keyword_harvest_is_approval_gated_and_explicitly_non_reversible():
     assert required_confirmation("search_term", "create_keyword") == "CREATE KEYWORD"
 
 
+def test_negative_product_target_requires_confirmation_and_has_no_rollback():
+    item = capability("campaign", "add_negative_product")
+    assert item.recommendation_supported and item.approval_supported
+    assert item.live_baseline_read_supported and item.live_apply_supported
+    assert item.verification_supported and not item.rollback_supported
+    assert required_confirmation("campaign", "add_negative_product") == (
+        "ADD NEGATIVE PRODUCT TARGET"
+    )
+
+
 def test_local_diagnostic_is_recommendation_only():
     item = capability("search_term", "flag")
     assert item.recommendation_supported

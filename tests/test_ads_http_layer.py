@@ -359,6 +359,52 @@ def test_campaign_level_negative_conflicts_with_ad_group_destination():
     assert c.negative_keyword_exists("c-1", "g-1", "bad query")
 
 
+def test_negative_product_target_create_uses_asin_expression_and_preflights(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.negativeTargets.list":
+            return {"negativeTargets": []}
+        return {"negativeTargets": {"success": [{"targetId": "nt-1"}]}}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    result = c.create_negative_product_target(
+        campaign_id="c-1", ad_group_id="g-1", asin="b012345678", dry_run=False
+    )
+    assert result["negativeTargets"]["success"][0]["targetId"] == "nt-1"
+    assert calls == [
+        ("ads.negativeTargets.list", {"maxResults": 500, "campaignIdFilter": {"include": ["c-1"]}}),
+        (
+            "ads.negativeTargets.create",
+            {"negativeTargets": [{
+                "campaignId": "c-1", "adGroupId": "g-1", "state": "ENABLED",
+                "expression": [{"type": "asinSameAs", "value": "B012345678"}],
+            }]},
+        ),
+    ]
+
+
+def test_negative_product_duplicate_and_invalid_asin_fail_closed(monkeypatch):
+    c = client()
+    c.list_negative_targets = lambda campaign_id, next_token=None: {
+        "negativeTargets": [{
+            "campaignId": campaign_id,
+            "expression": [{"type": "asinSameAs", "value": "B012345678"}],
+        }]
+    }
+    with pytest.raises(RuntimeError, match="already exists"):
+        c.create_negative_product_target(
+            campaign_id="c-1", ad_group_id="g-1", asin="B012345678", dry_run=False
+        )
+    with pytest.raises(ValueError, match="10-character ASIN"):
+        c.create_negative_product_target(
+            campaign_id="c-1", ad_group_id="g-1", asin="ASIN", dry_run=False
+        )
+
+
 @pytest.mark.parametrize("endpoint", ["ads.keywords.create", "ads.negativeKeywords.create"])
 def test_non_idempotent_entity_creation_is_not_retried_after_provider_error(monkeypatch, endpoint):
     calls = []

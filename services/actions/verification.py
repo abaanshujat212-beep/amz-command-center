@@ -25,6 +25,7 @@ ACTION_METRICS = {
     "create_keyword": ("cost", "sales", "clicks", "orders", "acos", "cvr"),
     "add_negative_exact": ("cost", "sales", "clicks", "orders"),
     "add_negative_phrase": ("cost", "sales", "clicks", "orders"),
+    "add_negative_product": ("cost", "sales", "clicks", "orders"),
 }
 
 

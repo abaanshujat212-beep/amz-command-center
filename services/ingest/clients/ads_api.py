@@ -26,6 +26,8 @@ _ADS_MEDIA_TYPES = {
     "ads.targets.update": "application/vnd.spTargetingClause.v3+json",
     "ads.negativeKeywords.list": "application/vnd.spNegativeKeyword.v3+json",
     "ads.negativeKeywords.create": "application/vnd.spNegativeKeyword.v3+json",
+    "ads.negativeTargets.list": "application/vnd.spTargetingClause.v3+json",
+    "ads.negativeTargets.create": "application/vnd.spTargetingClause.v3+json",
 }
 
 
@@ -434,6 +436,74 @@ class AdsClient:
             first = errors[0] if isinstance(errors, list) else errors
             code = first.get("errorCode") or first.get("code") or "unknown" if isinstance(first, dict) else "unknown"
             raise RuntimeError(f"Amazon Ads rejected negative keyword creation ({code})")
+        return result
+
+    def list_negative_targets(self, campaign_id: str, next_token: str | None = None) -> dict:
+        body: dict = {"maxResults": 500, "campaignIdFilter": {"include": [campaign_id]}}
+        if next_token:
+            body["nextToken"] = next_token
+        return self._call("ads.negativeTargets.list", body=body)
+
+    def negative_product_target_exists(self, campaign_id: str, asin: str) -> bool:
+        expected = asin.strip().upper()
+        next_token = None
+        pages = 0
+        while True:
+            result = self.list_negative_targets(campaign_id, next_token)
+            rows = result.get("negativeTargets") or result.get("targetingClauses") or []
+            for row in rows:
+                if str(row.get("campaignId")) != str(campaign_id):
+                    continue
+                expression = row.get("expression") or row.get("targetingExpression") or []
+                if isinstance(expression, dict):
+                    expression = (
+                        expression.get("expression")
+                        or expression.get("expressions")
+                        or ([expression] if expression.get("type") else [])
+                    )
+                if any(
+                    str(item.get("type") or "").casefold() == "asinsameas"
+                    and str(item.get("value") or "").strip().upper() == expected
+                    for item in expression
+                    if isinstance(item, dict)
+                ):
+                    return True
+            next_token = result.get("nextToken") or result.get("next_token")
+            if not next_token:
+                return False
+            pages += 1
+            if pages >= 1000:
+                raise RuntimeError("negative target duplicate check exceeded 1000 Ads API pages")
+
+    def create_negative_product_target(
+        self, *, campaign_id: str, asin: str, ad_group_id: str | None = None,
+        dry_run: bool = True,
+    ) -> dict:
+        product_id = asin.strip().upper()
+        if not campaign_id or not ad_group_id or len(product_id) != 10 or not product_id.isalnum():
+            raise ValueError("campaign id, ad group id, and a 10-character ASIN are required")
+        if dry_run:
+            return {
+                "status": "WOULD_DO", "campaign_id": campaign_id,
+                "ad_group_id": ad_group_id, "asin": product_id,
+            }
+        if self.negative_product_target_exists(campaign_id, product_id):
+            raise RuntimeError("negative product target already exists in the selected campaign")
+        row: dict[str, Any] = {
+            "campaignId": campaign_id,
+            "state": "ENABLED",
+            "expression": [{"type": "asinSameAs", "value": product_id}],
+        }
+        row["adGroupId"] = ad_group_id
+        result = self._call_mutating(
+            "ads.negativeTargets.create", body={"negativeTargets": [row]}
+        )
+        payload = result.get("negativeTargets") if isinstance(result, dict) else None
+        errors = (payload.get("error") or payload.get("errors") or []) if isinstance(payload, dict) else []
+        if errors:
+            first = errors[0] if isinstance(errors, list) else errors
+            code = (first.get("errorCode") or first.get("code") or "unknown") if isinstance(first, dict) else "unknown"
+            raise RuntimeError(f"Amazon Ads rejected negative product target creation ({code})")
         return result
 
     @staticmethod

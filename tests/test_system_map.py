@@ -18,7 +18,7 @@ from services.rules.guardrails import Guard
 from services.rules.query import SCOPE_SOURCES
 from services.rules.rule_catalog import ALL_RULES
 
-# The nine action types the database allows, per 0006. Written out rather than
+# The ten action types the latest database migration allows. Written out rather than
 # imported so that changing the constraint forces a conscious edit here.
 EXPECTED_ACTION_TYPES = sorted(
     [
@@ -28,6 +28,7 @@ EXPECTED_ACTION_TYPES = sorted(
         "enable",
         "add_negative_exact",
         "add_negative_phrase",
+        "add_negative_product",
         "create_keyword",
         "set_placement_modifier",
         "flag",
@@ -109,8 +110,8 @@ def test_a_flag_can_never_reach_an_endpoint(scope):
     assert ep.endpoint_for_action("flag", scope) is None
 
 
-def test_mutating_endpoints_are_exactly_these_six():
-    """The complete blast radius of this system. Adding a seventh way to change a
+def test_mutating_endpoints_are_exactly_these_seven():
+    """The complete blast radius of this system. Adding a new way to change a
     client's account should require deleting a line from a test."""
     assert {e.key for e in ep.mutating()} == {
         "ads.campaigns.update",
@@ -119,6 +120,7 @@ def test_mutating_endpoints_are_exactly_these_six():
         "ads.keywords.create",
         "ads.targets.update",
         "ads.negativeKeywords.create",
+        "ads.negativeTargets.create",
     }
 
 

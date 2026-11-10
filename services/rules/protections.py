@@ -9,6 +9,7 @@ DESTRUCTIVE_ACTIONS = frozenset(
     {
         "add_negative_exact",
         "add_negative_phrase",
+        "add_negative_product",
         "pause",
         "set_status_paused",
     }
