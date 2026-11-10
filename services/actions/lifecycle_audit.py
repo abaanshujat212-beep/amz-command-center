@@ -18,7 +18,8 @@ def record_retry(conn, action: sm.Action, *, attempt: int, correlation_key: str,
         action = sm.retry(action)
         new_state = action.status.value
         conn.execute(
-            """update action set status=%s,error=null,approved_by=null,approved_at=null
+            """update action set status=%s,error=null,approved_by=null,approved_at=null,
+                      approval_confirmation=null
                  where tenant_id=%s and id=%s""",
             (new_state, action.tenant_id, action.id),
         )

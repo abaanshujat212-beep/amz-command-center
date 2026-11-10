@@ -1,4 +1,4 @@
-import { liveActionSupport } from "@/lib/action-support";
+import { actionCapability, liveActionSupport } from "@/lib/action-support";
 import { query, withTenant } from "@/lib/db";
 
 type Decision = "approved" | "rejected";
@@ -37,6 +37,7 @@ export async function decideAction(input: {
   role: string;
   actionId: string;
   decision: Decision;
+  confirmation?: string;
 }) {
   if (input.role !== "owner" && input.role !== "admin") {
     throw new ApprovalDecisionError(
@@ -53,6 +54,10 @@ export async function decideAction(input: {
         [input.actionId],
       );
       if (candidate.length > 0) {
+        const confirmationPhrase = actionCapability(candidate[0].entity_type, candidate[0].action_type).confirmation_phrase;
+        if (confirmationPhrase && input.confirmation !== confirmationPhrase) {
+          throw new ApprovalDecisionError(`Type ${confirmationPhrase} to confirm this non-reversible action.`);
+        }
         const readiness = await query<{
           readiness_state: string;
           verification_level: string | null;
@@ -99,10 +104,11 @@ export async function decideAction(input: {
       before_value: unknown;
       after_value: unknown;
       decided_at: string;
+      approval_confirmation: string | null;
     }>(
       c,
-      `update action set status=$2, decision=$2, decided_by=$3, decided_at=now(), approved_by=case when $4::boolean then $3::uuid else approved_by end, approved_at=case when $4::boolean then now() else approved_at end where id=$1 and status='pending' and expires_at > now() and action_type <> 'flag' returning id, entity_type, entity_id, action_type, before_value, after_value, decided_at::text as decided_at`,
-      [input.actionId, input.decision, input.userId, isApproval],
+      `update action set status=$2, decision=$2, decided_by=$3, decided_at=now(), approved_by=case when $4::boolean then $3::uuid else approved_by end, approved_at=case when $4::boolean then now() else approved_at end, approval_confirmation=case when $4::boolean then $5::text else null end where id=$1 and status='pending' and expires_at > now() and action_type <> 'flag' returning id, entity_type, entity_id, action_type, before_value, after_value, decided_at::text as decided_at, approval_confirmation`,
+      [input.actionId, input.decision, input.userId, isApproval, input.confirmation ?? null],
     );
     if (rows.length === 0) {
       const existing = await query<{
@@ -153,6 +159,7 @@ export async function decideAction(input: {
           decision: input.decision,
           decided_at: a.decided_at,
           action_type: a.action_type,
+          approval_confirmation: a.approval_confirmation,
           value: a.after_value,
         }),
       ],

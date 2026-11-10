@@ -5,6 +5,7 @@ from packages.shared.action_capabilities import (
     assert_worker_capability,
     capability,
     live_ready,
+    required_confirmation,
 )
 
 
@@ -19,6 +20,7 @@ def test_keyword_harvest_is_approval_gated_and_explicitly_non_reversible():
     assert item.live_baseline_read_supported
     assert item.live_apply_supported
     assert not item.rollback_supported
+    assert required_confirmation("search_term", "create_keyword") == "CREATE KEYWORD"
 
 
 def test_local_diagnostic_is_recommendation_only():

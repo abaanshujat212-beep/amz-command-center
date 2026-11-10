@@ -8,6 +8,7 @@ type Capability = {
 	rollback_supported: boolean
 	verification_supported: boolean
 	local_only: boolean
+	confirmation_phrase?: string | null
 }
 
 const EMPTY: Capability = {
@@ -18,6 +19,7 @@ const EMPTY: Capability = {
 	rollback_supported: false,
 	verification_supported: false,
 	local_only: false,
+	confirmation_phrase: null,
 }
 
 export function actionCapability(entityType: string, actionType: string): Capability {
@@ -28,9 +30,9 @@ export function actionCapability(entityType: string, actionType: string): Capabi
 export function liveActionSupport(entityType: string, actionType: string, readinessState?: string, verificationLevel?: string): { supported: boolean; message: string; capability: Capability } {
 	const capability = actionCapability(entityType, actionType)
 	const authorizedEvidence = verificationLevel === "AUTHORIZED_LIVE_READ" || verificationLevel === "AUTHORIZED_LIVE_WRITE"
-	const complete = capability.recommendation_supported && capability.approval_supported && capability.live_baseline_read_supported && capability.live_apply_supported && capability.rollback_supported && capability.verification_supported && !capability.local_only
+	const complete = capability.recommendation_supported && capability.approval_supported && capability.live_baseline_read_supported && capability.live_apply_supported && (capability.rollback_supported || typeof capability.confirmation_phrase === "string") && capability.verification_supported && !capability.local_only
 	if (complete && readinessState === "LIVE_READY" && authorizedEvidence) {
-		return { supported: true, message: "Capability is live-ready with authorized evidence.", capability }
+		return { supported: true, message: capability.confirmation_phrase ? `Live-ready; approval requires typing ${capability.confirmation_phrase}.` : "Capability is live-ready with authorized evidence.", capability }
 	}
 	return { supported: false, message: "Capability is recommend-only, unsupported, or lacks authorized LIVE_READY evidence; approval is blocked.", capability }
 }

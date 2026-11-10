@@ -65,6 +65,11 @@ def test_approval_ui_uses_canonical_false_by_default_capability_registry():
     assert "liveActionSupport" in decision
     assert "external_dependency_state" in decision
     assert "!live.supported" in page
+    assert "readiness?.readiness_state" in page
+    assert "external_dependency_state" in page
+    assert '"confirmation_phrase": "CREATE KEYWORD"' in (ROOT / "packages/shared/action_capabilities.json").read_text(encoding="utf-8")
+    assert "approval_confirmation" in decision
+    assert "Non-reversible action" in page
 
 
 def test_header_reads_tenant_and_ads_profile_through_rls_context():

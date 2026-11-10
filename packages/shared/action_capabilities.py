@@ -19,9 +19,10 @@ class ActionCapability:
     rollback_supported: bool = False
     verification_supported: bool = False
     local_only: bool = False
+    confirmation_phrase: str | None = None
 
 
-_RAW: dict[str, dict[str, bool]] = json.loads(_REGISTRY_PATH.read_text())
+_RAW: dict[str, dict[str, bool | str | None]] = json.loads(_REGISTRY_PATH.read_text())
 _REGISTRY = {key: ActionCapability(**value) for key, value in _RAW.items()}
 
 
@@ -31,6 +32,11 @@ def capability(entity_type: str, action_type: str) -> ActionCapability:
         f"{entity_type}:{action_type}",
         _REGISTRY.get(f"*:{action_type}", ActionCapability()),
     )
+
+
+def required_confirmation(entity_type: str, action_type: str) -> str | None:
+    """Return the exact human confirmation needed for a non-reversible action."""
+    return capability(entity_type, action_type).confirmation_phrase
 
 
 def live_ready(readiness_state: str | None, verification_level: str | None) -> bool:
