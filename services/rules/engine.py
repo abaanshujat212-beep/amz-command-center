@@ -29,7 +29,7 @@ from services.rules.compiler import (
 )
 from services.rules.evidence import build_guardrail_context
 from services.rules.freshness import resolve_source_freshness
-from services.rules.harvest import plan_harvest, record_lineage
+from services.rules.harvest import plan_harvest, record_lineage, resolve_harvest_bid
 from services.rules.protections import active_protection
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 from services.rules.recommendations import build_metadata, configuration_snapshots
@@ -237,6 +237,27 @@ def evaluate_tenant(
                     )
                     if harvest.blocked_by:
                         decision.block(gr.Guard(harvest.blocked_by), harvest.note)
+                    elif harvest.route is not None and harvest.candidate is not None and harvest.candidate.match_type != "exact":
+                        decision.block(
+                            gr.Guard.UNSUPPORTED_ACTION,
+                            "product-target harvest is not supported by the exact-keyword action worker",
+                        )
+                    elif harvest.route is not None:
+                        try:
+                            bid, bid_clamped = resolve_harvest_bid(
+                                row.get("cpc"),
+                                str(rule["action_jsonb"].get("bid_source", "")),
+                                min_bid=cfg.min_bid,
+                                max_bid=cfg.max_bid,
+                            )
+                            decision.value = bid
+                            if bid_clamped:
+                                decision.clamped = True
+                                decision.notes.append(
+                                    f"harvest bid bounded to tenant limits [{cfg.min_bid:.2f}, {cfg.max_bid:.2f}]"
+                                )
+                        except (TypeError, ValueError) as exc:
+                            decision.block(gr.Guard.BOUNDS, str(exc))
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
@@ -249,6 +270,12 @@ def evaluate_tenant(
                 )
                 if harvest is not None:
                     metrics["harvest_routing"] = harvest.evidence()
+                    if action_type == "create_keyword":
+                        metrics["harvest_bid"] = {
+                            "source": rule["action_jsonb"].get("bid_source"),
+                            "value": decision.value if decision.allowed else None,
+                            "clamped": decision.clamped,
+                        }
                 reason = render_reason(
                     rule["action_jsonb"].get("reason_template", rule["code"]),
                     metrics,
@@ -265,6 +292,12 @@ def evaluate_tenant(
                     strategy_snapshot=strategy_snapshot,
                 )
                 contract = metadata.as_dict()
+                proposed_action = {"type": action_type, "value": decision.value}
+                if harvest is not None and harvest.destination:
+                    proposed_action["destination"] = harvest.destination
+                if action_type == "create_keyword":
+                    proposed_action["bid_source"] = rule["action_jsonb"].get("bid_source")
+                    proposed_action["source_cpc"] = float(row["cpc"]) if row.get("cpc") is not None else None
 
                 cur.execute(
                     "insert into rule_evaluation (tenant_id, rule_id, run_id,"
@@ -280,18 +313,7 @@ def evaluate_tenant(
                         key[1],
                         freshness.data_through,
                         json.dumps(metrics, default=str),
-                        json.dumps(
-                            {
-                                "type": action_type,
-                                "value": decision.value,
-                                **(
-                                    {"destination": harvest.destination}
-                                    if harvest is not None and harvest.destination
-                                    else {}
-                                ),
-                            },
-                            default=str,
-                        ),
+                        json.dumps(proposed_action, default=str),
                         reason,
                         decision.blocked_by.value if decision.blocked_by else None,
                         contract["recommendation_type"],
@@ -312,6 +334,15 @@ def evaluate_tenant(
                     s.block(decision.blocked_by)
                 else:
                     # Existing action remains the one authoritative approval queue.
+                    before_payload = None if action_type == "create_keyword" else {"value": current}
+                    after_payload = {"value": decision.value}
+                    if diagnostic:
+                        after_payload["diagnostic"] = True
+                    elif harvest is not None and harvest.destination:
+                        after_payload["destination"] = harvest.destination
+                    if action_type == "create_keyword":
+                        after_payload["bid_source"] = rule["action_jsonb"].get("bid_source")
+                        after_payload["source_cpc"] = float(row["cpc"]) if row.get("cpc") is not None else None
                     cur.execute(
                         "insert into action (tenant_id, rule_id, evaluation_id,entity_type,entity_id,action_type,"
                         " before_value,after_value,reason_text,clamped,clamp_note,idempotency_key,recommendation_type,"
@@ -319,7 +350,7 @@ def evaluate_tenant(
                         " values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
                         " on conflict (tenant_id,idempotency_key) do nothing returning id",
                         (tenant_id,rule["id"],evaluation_id,rule["scope"],key[1],action_type,
-                         json.dumps({"value":current}),json.dumps({"value":decision.value,"diagnostic":True} if diagnostic else {"value":decision.value,**({"destination":harvest.destination} if harvest is not None else {})}),
+                         json.dumps(before_payload),json.dumps(after_payload),
                          reason,decision.clamped,"; ".join(decision.notes) or None,f"{run_id}:{rule['code']}:{key[1]}",
                          contract["recommendation_type"],contract["confidence"],contract["risk"],contract["lookback_days"],
                          json.dumps(contract["objective_snapshot"],default=str),json.dumps(contract["strategy_snapshot"],default=str),
@@ -342,7 +373,7 @@ def evaluate_tenant(
                         claimed.add(key)
                         s.proposed += 1
 
-                metric_keys = sorted(k for k, value in metrics.items() if value is not None and k not in {"source_freshness","guardrail_context","harvest_routing"})
+                metric_keys = sorted(k for k, value in metrics.items() if value is not None and k not in {"source_freshness","guardrail_context","harvest_routing","harvest_bid"})
                 completeness = "complete" if freshness.usable and metrics.get("break_even_acos") is not None else "partial"
                 cur.execute(
                     """insert into recommendation_evidence(tenant_id,optimizer_run_id,evaluation_id,action_id,

@@ -71,6 +71,8 @@ GUARD_EXPLANATIONS: dict[str, str] = {
     "match type, strategy and funnel purpose, so there is no safe destination.",
     "HARVEST_ROUTE_CONFLICT": "Two equally specific harvest routes point at different "
     "destinations; an operator must resolve the routing before it is promoted.",
+    "UNSUPPORTED_ACTION": "This action type or target is not implemented for safe live execution, "
+    "so no change is sent to Amazon.",
 }
 
 

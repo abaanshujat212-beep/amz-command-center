@@ -12,6 +12,15 @@ def test_unknown_capability_is_false_by_default():
     assert capability("campaign", "delete") == ActionCapability()
 
 
+def test_keyword_harvest_is_approval_gated_and_explicitly_non_reversible():
+    item = capability("search_term", "create_keyword")
+    assert item.recommendation_supported
+    assert item.approval_supported
+    assert item.live_baseline_read_supported
+    assert item.live_apply_supported
+    assert not item.rollback_supported
+
+
 def test_local_diagnostic_is_recommendation_only():
     item = capability("search_term", "flag")
     assert item.recommendation_supported
@@ -46,12 +55,19 @@ def test_worker_requires_both_supported_phase_and_authorized_readiness():
     )
 
 
-def test_incomplete_rollback_fails_closed():
-    with pytest.raises(RuntimeError, match="unsupported capability"):
+def test_placement_rollback_requires_authorized_live_evidence():
+    assert_worker_capability(
+        "campaign",
+        "set_placement_modifier",
+        phase="rollback",
+        readiness_state="LIVE_READY",
+        verification_level="AUTHORIZED_LIVE_WRITE",
+    )
+    with pytest.raises(RuntimeError, match="not LIVE_READY"):
         assert_worker_capability(
             "campaign",
             "set_placement_modifier",
             phase="rollback",
             readiness_state="LIVE_READY",
-            verification_level="AUTHORIZED_LIVE_WRITE",
+            verification_level="STATIC_CONTRACT",
         )

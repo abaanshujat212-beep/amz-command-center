@@ -76,9 +76,24 @@ class AdsActionClient:
             return self.ads.keyword_bid(action.entity_id)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.target_bid(action.entity_id)
+        if action.action_type == "create_keyword" and action.entity_type == "search_term":
+            destination = action.after_value.get("destination") or {}
+            ad_group_id = str(destination.get("ad_group_id") or "")
+            match_type = str(destination.get("match_type") or "").lower()
+            if match_type != "exact" or not ad_group_id:
+                raise RuntimeError("keyword harvest requires an exact destination ad group")
+            if self.ads.exact_keyword_exists(ad_group_id, action.entity_id):
+                raise RuntimeError("exact keyword already exists in destination ad group")
+            return None
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
+        if action.action_type in {"pause", "enable"}:
+            return self.ads.entity_status(action.entity_type, action.entity_id)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.ad_group_default_bid(action.entity_id)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.campaign_budget(action.entity_id)
         raise NotImplementedError(
             f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}. "
             "No verified live read/apply/rollback implementation exists."
@@ -91,6 +106,18 @@ class AdsActionClient:
             return self.ads.update_bid(action.entity_id, float(value), dry_run=False)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(value), dry_run=False)
+        if action.action_type == "create_keyword" and action.entity_type == "search_term":
+            destination = action.after_value.get("destination") or {}
+            if str(destination.get("match_type") or "").lower() != "exact":
+                raise RuntimeError("only exact keyword harvest is supported")
+            return self.ads.create_keyword(
+                campaign_id=str(destination.get("campaign_id") or ""),
+                ad_group_id=str(destination.get("ad_group_id") or ""),
+                keyword_text=action.entity_id,
+                match_type="EXACT",
+                bid=float(value),
+                dry_run=False,
+            )
         if action.action_type == "set_placement_modifier":
             return self.ads.update_placement_modifier(
                 action.entity_id,
@@ -99,6 +126,13 @@ class AdsActionClient:
                 float(action.before_value["value"]) if action.before_value else None,
                 dry_run=False,
             )
+        if action.action_type in {"pause", "enable"}:
+            state = "PAUSED" if action.action_type == "pause" else "ENABLED"
+            return self.ads.update_entity_status(action.entity_type, action.entity_id, state, dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.update_ad_group_default_bid(action.entity_id, float(value), dry_run=False)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.update_campaign_budget(action.entity_id, float(value), dry_run=False)
         raise NotImplementedError(
             f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}"
         )
@@ -112,6 +146,28 @@ class AdsActionClient:
             return self.ads.update_bid(action.entity_id, float(original), dry_run=False)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(original), dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.update_ad_group_default_bid(action.entity_id, float(original), dry_run=False)
+        if action.action_type == "set_placement_modifier" and action.entity_type == "campaign":
+            placement = str(action.before_value.get("placement") or action.after_value["placement"])
+            current = self.ads.placement_modifier(action.entity_id, placement)
+            current_value = current.get("value")
+            if current_value is None:
+                raise RuntimeError(
+                    f"cannot rollback placement modifier for campaign {action.entity_id}: "
+                    "current value is unavailable"
+                )
+            return self.ads.update_placement_modifier(
+                action.entity_id,
+                placement,
+                float(original),
+                float(current_value),
+                dry_run=False,
+            )
+        if action.action_type in {"pause", "enable"}:
+            return self.ads.update_entity_status(action.entity_type, action.entity_id, str(original), dry_run=False)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.update_campaign_budget(action.entity_id, float(original), dry_run=False)
         raise NotImplementedError(
             f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}"
         )

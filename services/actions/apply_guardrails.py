@@ -104,8 +104,11 @@ def validate_apply_guardrails(
     if evaluated < 0 or matched < 0 or matched > evaluated or min_clicks < 0 or min_impressions < 0:
         raise ApplyGuardrailError("guardrail_context contains impossible counts")
 
-    before = _number((action.before_value or {}).get("value"), "before_value")
-    after = _number(action.after_value.get("value"), "after_value")
+    numeric_action = action.action_type in {
+        "set_bid", "set_budget", "set_placement_modifier", "create_keyword"
+    }
+    before = _number((action.before_value or {}).get("value"), "before_value") if numeric_action else None
+    after = _number(action.after_value.get("value"), "after_value") if numeric_action else None
     proposal = gr.Proposal(
         entity_type=action.entity_type,
         entity_id=action.entity_id,
@@ -132,6 +135,9 @@ def validate_apply_guardrails(
         raise ApplyGuardrailError(f"{guard}: {'; '.join(decision.notes)}")
     if decision.clamped or decision.value != after:
         raise ApplyGuardrailError("current guardrails would change the approved target")
+    if action.action_type == "create_keyword" and after is not None:
+        if not cfg.min_bid <= after <= cfg.max_bid:
+            raise ApplyGuardrailError("approved keyword bid is outside current tenant bid bounds")
 
     budget_increase = 0.0
     if action.action_type == "set_budget" and before is not None and after is not None:

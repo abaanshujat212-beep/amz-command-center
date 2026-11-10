@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,23 @@ import httpx
 from packages.shared import endpoints as ep
 from packages.shared.marketplaces import DEFAULT, Marketplace
 from services.ingest.clients import rate_limit
+
+_ADS_MEDIA_TYPES = {
+    "ads.campaigns.list": "application/vnd.spCampaign.v3+json",
+    "ads.campaigns.update": "application/vnd.spCampaign.v3+json",
+    "ads.adGroups.list": "application/vnd.spAdGroup.v3+json",
+    "ads.adGroups.update": "application/vnd.spAdGroup.v3+json",
+    "ads.keywords.list": "application/vnd.spKeyword.v3+json",
+    "ads.keywords.create": "application/vnd.spKeyword.v3+json",
+    "ads.keywords.update": "application/vnd.spKeyword.v3+json",
+    "ads.targets.list": "application/vnd.spTargetingClause.v3+json",
+    "ads.targets.update": "application/vnd.spTargetingClause.v3+json",
+    "ads.negativeKeywords.create": "application/vnd.spNegativeKeyword.v3+json",
+}
+
+
+def _normalize_keyword(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 class LookbackExceeded(ValueError):
@@ -104,7 +122,11 @@ class AdsClient:
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:
         endpoint = ep.endpoint(endpoint_key)
-        kwargs: dict[str, Any] = {"headers": self.headers(), "timeout": self.timeout_s}
+        headers = self.headers()
+        media_type = _ADS_MEDIA_TYPES.get(endpoint_key, "application/json")
+        headers["Content-Type"] = media_type
+        headers["Accept"] = media_type
+        kwargs: dict[str, Any] = {"headers": headers, "timeout": self.timeout_s}
         if body is not None:
             kwargs["json"] = body
         return httpx.request(endpoint.method.upper(), self.url(endpoint_key, **path_params), **kwargs)
@@ -166,19 +188,211 @@ class AdsClient:
             body["campaignIdFilter"] = {"include": campaign_ids}
         return self._call("ads.campaigns.list", body=body)
 
-    def list_keywords(self, campaign_ids: list[str] | None = None, keyword_ids: list[str] | None = None) -> dict:
+    def list_ad_groups(self, ad_group_ids: list[str] | None = None) -> dict:
+        body: dict = {"maxResults": 500}
+        if ad_group_ids:
+            body["adGroupIdFilter"] = {"include": ad_group_ids}
+        return self._call("ads.adGroups.list", body=body)
+
+    def campaign_status(self, campaign_id: str) -> dict:
+        result = self.list_campaigns(campaign_ids=[campaign_id])
+        campaigns = result.get("campaigns") or result.get("campaignResponse") or []
+        for campaign in campaigns:
+            if str(campaign.get("campaignId")) == str(campaign_id):
+                state = campaign.get("state")
+                if state is None:
+                    raise RuntimeError(f"campaign {campaign_id} response did not include state")
+                return {"value": str(state).upper()}
+        raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
+
+    def campaign_budget(self, campaign_id: str) -> dict:
+        result = self.list_campaigns(campaign_ids=[campaign_id])
+        campaigns = result.get("campaigns") or result.get("campaignResponse") or []
+        for campaign in campaigns:
+            if str(campaign.get("campaignId")) != str(campaign_id):
+                continue
+            budget = campaign.get("budget")
+            if isinstance(budget, dict):
+                value = budget.get("budget")
+            else:
+                value = budget
+            if value is None:
+                raise RuntimeError(f"campaign {campaign_id} response did not include budget")
+            return {"value": float(value)}
+        raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
+
+    def update_campaign_status(self, campaign_id: str, status: str, *, dry_run: bool = True) -> dict:
+        normalized = status.strip().upper()
+        if normalized not in {"ENABLED", "PAUSED"}:
+            raise ValueError("campaign status must be ENABLED or PAUSED")
+        if dry_run:
+            return {"status": "WOULD_DO", "campaign_id": campaign_id, "state": normalized}
+        return self._call_mutating(
+            "ads.campaigns.update",
+            body={"campaigns": [{"campaignId": campaign_id, "state": normalized}]},
+        )
+
+    def update_campaign_budget(self, campaign_id: str, budget: float, *, dry_run: bool = True) -> dict:
+        amount = float(budget)
+        if amount <= 0:
+            raise ValueError("campaign budget must be greater than zero")
+        if dry_run:
+            return {"status": "WOULD_DO", "campaign_id": campaign_id, "budget": amount}
+        return self._call_mutating(
+            "ads.campaigns.update",
+            body={"campaigns": [{"campaignId": campaign_id, "budget": {"budget": amount}}]},
+        )
+
+    def list_keywords(
+        self,
+        campaign_ids: list[str] | None = None,
+        keyword_ids: list[str] | None = None,
+        ad_group_ids: list[str] | None = None,
+        next_token: str | None = None,
+    ) -> dict:
         body: dict = {"maxResults": 500}
         if campaign_ids:
             body["campaignIdFilter"] = {"include": campaign_ids}
         if keyword_ids:
             body["keywordIdFilter"] = {"include": keyword_ids}
+        if ad_group_ids:
+            body["adGroupIdFilter"] = {"include": ad_group_ids}
+        if next_token:
+            body["nextToken"] = next_token
         return self._call("ads.keywords.list", body=body)
+
+    def exact_keyword_exists(self, ad_group_id: str, keyword_text: str) -> bool:
+        """Page through one ad group and compare normalized exact keywords locally."""
+        expected = _normalize_keyword(keyword_text)
+        next_token = None
+        pages = 0
+        while True:
+            result = self.list_keywords(ad_group_ids=[ad_group_id], next_token=next_token)
+            rows = result.get("keywords") or result.get("keywordResponse") or []
+            if any(
+                _normalize_keyword(str(row.get("keywordText") or "")) == expected
+                and str(row.get("matchType") or "").upper() == "EXACT"
+                and str(row.get("state") or "").upper() in {"ENABLED", "PAUSED"}
+                for row in rows
+            ):
+                return True
+            next_token = result.get("nextToken") or result.get("next_token")
+            if not next_token:
+                return False
+            pages += 1
+            if pages >= 1000:
+                raise RuntimeError("keyword duplicate check exceeded 1000 Ads API pages")
+
+    def create_keyword(
+        self,
+        *,
+        campaign_id: str,
+        ad_group_id: str,
+        keyword_text: str,
+        bid: float,
+        match_type: str = "EXACT",
+        dry_run: bool = True,
+    ) -> dict:
+        text = " ".join(keyword_text.split())
+        normalized_match = match_type.strip().upper()
+        amount = float(bid)
+        if not campaign_id or not ad_group_id or not text:
+            raise ValueError("campaign, ad group, and keyword text are required")
+        if normalized_match != "EXACT":
+            raise ValueError("only exact keyword creation is supported")
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError("keyword bid must be a finite positive amount")
+        if dry_run:
+            return {
+                "status": "WOULD_DO", "campaign_id": campaign_id, "ad_group_id": ad_group_id,
+                "keyword_text": text, "match_type": normalized_match, "bid": amount,
+            }
+        if self.exact_keyword_exists(ad_group_id, text):
+            raise RuntimeError(f"exact keyword already exists in destination ad group {ad_group_id}")
+        result = self._call_mutating(
+            "ads.keywords.create",
+            body={"keywords": [{
+                "campaignId": campaign_id,
+                "adGroupId": ad_group_id,
+                "keywordText": text,
+                "matchType": normalized_match,
+                "state": "ENABLED",
+                "bid": amount,
+            }]},
+        )
+        keyword_result = result.get("keywords") if isinstance(result, dict) else None
+        errors = []
+        if isinstance(keyword_result, dict):
+            errors = keyword_result.get("error") or keyword_result.get("errors") or []
+        if errors:
+            raise RuntimeError(f"Amazon Ads rejected keyword creation: {errors}")
+        return result
 
     def list_targets(self, target_ids: list[str] | None = None) -> dict:
         body: dict = {"maxResults": 500}
         if target_ids:
             body["targetIdFilter"] = {"include": target_ids}
         return self._call("ads.targets.list", body=body)
+
+    @staticmethod
+    def _read_entity_state(rows: list[dict], entity_id: str, id_field: str, kind: str) -> dict:
+        for row in rows:
+            if str(row.get(id_field)) == str(entity_id):
+                state = row.get("state")
+                if state is None:
+                    raise RuntimeError(f"{kind} {entity_id} response did not include state")
+                return {"value": str(state).upper()}
+        raise RuntimeError(f"{kind} {entity_id} was not returned by Ads API")
+
+    def entity_status(self, entity_type: str, entity_id: str) -> dict:
+        if entity_type == "campaign":
+            return self.campaign_status(entity_id)
+        if entity_type == "ad_group":
+            result = self.list_ad_groups(ad_group_ids=[entity_id])
+            return self._read_entity_state(result.get("adGroups") or result.get("adGroupResponse") or [], entity_id, "adGroupId", "ad group")
+        if entity_type == "keyword":
+            result = self.list_keywords(keyword_ids=[entity_id])
+            return self._read_entity_state(result.get("keywords") or result.get("keywordResponse") or [], entity_id, "keywordId", "keyword")
+        if entity_type == "target":
+            result = self.list_targets(target_ids=[entity_id])
+            return self._read_entity_state(result.get("targets") or result.get("targetingClauses") or [], entity_id, "targetId", "target")
+        raise ValueError(f"unsupported status entity type: {entity_type}")
+
+    def update_entity_status(self, entity_type: str, entity_id: str, state: str, *, dry_run: bool = True) -> dict:
+        normalized = state.strip().upper()
+        if normalized not in {"ENABLED", "PAUSED"}:
+            raise ValueError("entity state must be ENABLED or PAUSED")
+        fields = {
+            "campaign": ("ads.campaigns.update", "campaigns", "campaignId"),
+            "ad_group": ("ads.adGroups.update", "adGroups", "adGroupId"),
+            "keyword": ("ads.keywords.update", "keywords", "keywordId"),
+            "target": ("ads.targets.update", "targetingClauses", "targetId"),
+        }
+        if entity_type not in fields:
+            raise ValueError(f"unsupported status entity type: {entity_type}")
+        endpoint, collection, id_field = fields[entity_type]
+        if dry_run:
+            return {"status": "WOULD_DO", "entity_type": entity_type, "entity_id": entity_id, "state": normalized}
+        return self._call_mutating(endpoint, body={collection: [{id_field: entity_id, "state": normalized}]})
+
+    def ad_group_default_bid(self, ad_group_id: str) -> dict:
+        result = self.list_ad_groups(ad_group_ids=[ad_group_id])
+        rows = result.get("adGroups") or result.get("adGroupResponse") or []
+        for row in rows:
+            if str(row.get("adGroupId")) == str(ad_group_id):
+                value = row.get("defaultBid", row.get("bid"))
+                if value is None:
+                    raise RuntimeError(f"ad group {ad_group_id} response did not include default bid")
+                return {"value": float(value)}
+        raise RuntimeError(f"ad group {ad_group_id} was not returned by Ads API")
+
+    def update_ad_group_default_bid(self, ad_group_id: str, bid: float, *, dry_run: bool = True) -> dict:
+        amount = float(bid)
+        if amount <= 0:
+            raise ValueError("ad group default bid must be greater than zero")
+        if dry_run:
+            return {"status": "WOULD_DO", "ad_group_id": ad_group_id, "bid": amount}
+        return self._call_mutating("ads.adGroups.update", body={"adGroups": [{"adGroupId": ad_group_id, "defaultBid": amount}]})
 
     def keyword_bid(self, keyword_id: str) -> dict:
         result = self.list_keywords(keyword_ids=[keyword_id])

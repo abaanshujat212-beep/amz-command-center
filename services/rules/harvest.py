@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -27,6 +28,26 @@ _BRAND_CLASS_ORDER = {"own_brand": 0, "competitor": 1}
 DUPLICATE_TARGET = "duplicate_target"
 ROUTE_MISSING = "harvest_route_missing"
 ROUTE_CONFLICT = "harvest_route_conflict"
+HARVEST_BID_SOURCES = {"cpc_x_1_15": 1.15}
+
+
+def resolve_harvest_bid(
+    cpc: float | None,
+    bid_source: str,
+    *,
+    min_bid: float,
+    max_bid: float,
+) -> tuple[float, bool]:
+    """Resolve the configured harvest bid and keep it inside tenant bounds."""
+    if bid_source not in HARVEST_BID_SOURCES:
+        raise ValueError(f"unsupported harvest bid source: {bid_source}")
+    if cpc is None or not math.isfinite(float(cpc)) or float(cpc) <= 0:
+        raise ValueError("settled search-term CPC is required to calculate a harvest bid")
+    if not math.isfinite(min_bid) or not math.isfinite(max_bid) or min_bid < 0 or max_bid < min_bid:
+        raise ValueError("tenant bid bounds are invalid")
+    raw = float(cpc) * HARVEST_BID_SOURCES[bid_source]
+    bounded = min(max(raw, min_bid), max_bid)
+    return round(bounded, 2), bounded != raw
 
 
 def normalize_term(term: str) -> str:
