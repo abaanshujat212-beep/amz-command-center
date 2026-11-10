@@ -28,6 +28,10 @@ class FakeAds:
         self.calls.append(("read_campaign_status", campaign_id))
         return {"value": self.state}
 
+    def campaign_budget(self, campaign_id):
+        self.calls.append(("read_campaign_budget", campaign_id))
+        return {"value": 20.0}
+
     def update_bid(self, entity_id, new_bid, dry_run=True):
         self.calls.append(("bid", entity_id, new_bid, dry_run))
         return {"ok": True}
@@ -42,6 +46,10 @@ class FakeAds:
 
     def update_campaign_status(self, campaign_id, status, dry_run=True):
         self.calls.append(("campaign_status", campaign_id, status, dry_run))
+        return {"ok": True}
+
+    def update_campaign_budget(self, campaign_id, budget, dry_run=True):
+        self.calls.append(("campaign_budget", campaign_id, budget, dry_run))
         return {"ok": True}
 
 
@@ -106,7 +114,7 @@ def test_target_bid_uses_target_read_and_update_endpoints():
 
 def test_unsupported_live_action_fails_before_any_ads_call():
     ads = FakeAds()
-    unsupported = action(action_type="set_budget", entity_type="campaign")
+    unsupported = action(action_type="archive", entity_type="campaign")
     try:
         live_client(ads).read_before_value(unsupported)
     except RuntimeError as exc:
@@ -172,6 +180,24 @@ def test_campaign_pause_reads_applies_and_restores_live_state():
         ("read_campaign_status", "c1"),
         ("campaign_status", "c1", "PAUSED", False),
         ("campaign_status", "c1", "ENABLED", False),
+    ]
+
+
+def test_campaign_budget_reads_applies_and_restores_live_value():
+    ads = FakeAds()
+    a = action("set_budget", "campaign")
+    a.entity_id = "c1"
+    a.before_value = {"value": 20.0}
+    a.after_value = {"value": 24.0}
+    client = live_client(ads)
+
+    assert client.read_before_value(a) == {"value": 20.0}
+    assert client.apply(a) == {"ok": True}
+    assert client.rollback(a) == {"ok": True}
+    assert ads.calls == [
+        ("read_campaign_budget", "c1"),
+        ("campaign_budget", "c1", 24.0, False),
+        ("campaign_budget", "c1", 20.0, False),
     ]
 
 
