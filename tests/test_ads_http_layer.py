@@ -56,6 +56,53 @@ def test_call_uses_catalogued_url_and_json_body(monkeypatch):
     assert calls[0][2]["headers"]["Accept"] == "application/vnd.spKeyword.v3+json"
 
 
+def test_campaign_budget_update_uses_v3_payload_and_rejects_item_errors(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url, kwargs))
+        return response(200, json={"campaigns": {"success": [{"campaignId": "c-1"}]}}, url=url)
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+    result = c.update_campaign_budget("c-1", 24.5, dry_run=False)
+    assert result["campaigns"]["success"][0]["campaignId"] == "c-1"
+    assert calls[0][0] == "PUT"
+    assert calls[0][1] == "https://advertising-api-eu.amazon.com/sp/campaigns"
+    assert calls[0][2]["json"] == {
+        "campaigns": [{"campaignId": "c-1", "budget": {"budget": 24.5}}]
+    }
+
+    monkeypatch.setattr(
+        c,
+        "_call_mutating",
+        lambda *args, **kwargs: {
+            "campaigns": {"error": [{"errorCode": "BUDGET_INVALID", "details": "rejected"}]}
+        },
+    )
+    with pytest.raises(RuntimeError, match="BUDGET_INVALID"):
+        c.update_campaign_budget("c-1", 25, dry_run=False)
+
+
+def test_campaign_budget_dry_run_does_not_call_ads(monkeypatch):
+    monkeypatch.setattr(
+        httpx,
+        "request",
+        lambda *args, **kwargs: pytest.fail("dry-run must not make an HTTP request"),
+    )
+    assert client().update_campaign_budget("c-1", 24.5, dry_run=True) == {
+        "status": "WOULD_DO",
+        "campaign_id": "c-1",
+        "budget": 24.5,
+    }
+
+
+@pytest.mark.parametrize("amount", [0, -1, float("nan"), float("inf")])
+def test_campaign_budget_update_rejects_nonfinite_or_nonpositive_amount(amount):
+    with pytest.raises(ValueError, match="finite positive"):
+        client().update_campaign_budget("c-1", amount, dry_run=False)
+
+
 def test_exact_keyword_duplicate_check_scans_all_pages(monkeypatch):
     c = client()
     calls = []
@@ -231,7 +278,7 @@ def test_campaign_status_update_rejects_unknown_states():
 
 
 def test_campaign_budget_update_rejects_nonpositive_amount():
-    with pytest.raises(ValueError, match="greater than zero"):
+    with pytest.raises(ValueError, match="finite positive"):
         client().update_campaign_budget("c-1", 0, dry_run=False)
 
 
