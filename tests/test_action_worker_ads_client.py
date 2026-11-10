@@ -406,6 +406,23 @@ def test_negative_product_target_requires_confirmation_and_duplicate_preflight()
     assert ads.calls == []
 
 
+@pytest.mark.parametrize(
+    ("action_type", "entity_type"),
+    [
+        ("create_keyword", "search_term"),
+        ("add_negative_exact", "search_term"),
+        ("add_negative_phrase", "search_term"),
+        ("add_negative_product", "campaign"),
+    ],
+)
+def test_nonreversible_capabilities_reject_worker_rollback(action_type, entity_type):
+    ads = FakeAds()
+    item = action(action_type, entity_type)
+    with pytest.raises(RuntimeError, match="unsupported capability"):
+        live_client(ads).rollback(item)
+    assert ads.calls == []
+
+
 def test_ad_group_default_bid_reads_applies_and_restores_live_value():
     ads = FakeAds()
     a = action("set_bid", "ad_group")

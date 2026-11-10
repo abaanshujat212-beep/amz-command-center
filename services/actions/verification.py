@@ -115,7 +115,16 @@ def performance_window(conn, action: sm.Action, start: dt.date, end: dt.date) ->
     if action.entity_type == "placement":
         return placement_window(conn, action.tenant_id, action.entity_id, start, end)
     if action.entity_type == "search_term":
-        return search_term_window(conn, action.tenant_id, action.entity_id, start, end)
+        destination = (action.after_value or {}).get("destination") or {}
+        return search_term_window(
+            conn,
+            action.tenant_id,
+            action.entity_id,
+            start,
+            end,
+            campaign_id=destination.get("campaign_id"),
+            ad_group_id=destination.get("ad_group_id"),
+        )
     raise ValueError(f"verification not wired for entity_type={action.entity_type!r}")
 
 
@@ -184,7 +193,16 @@ def placement_window(conn, tenant_id: str, entity_id: str, start: dt.date, end: 
     return _window_from_row(row)
 
 
-def search_term_window(conn, tenant_id: str, search_term: str, start: dt.date, end: dt.date) -> MetricWindow:
+def search_term_window(
+    conn,
+    tenant_id: str,
+    search_term: str,
+    start: dt.date,
+    end: dt.date,
+    *,
+    campaign_id: str | None = None,
+    ad_group_id: str | None = None,
+) -> MetricWindow:
     row = conn.execute(
         """
         select coalesce(sum(cost), 0) as cost,
@@ -196,11 +214,22 @@ def search_term_window(conn, tenant_id: str, search_term: str, start: dt.date, e
           from marts.mart_ppc_search_term_daily
          where tenant_id = %s
            and search_term = %s
+           and (%s is null or campaign_id = %s)
+           and (%s is null or ad_group_id = %s)
            and is_settled
            and report_date >= %s
            and report_date < %s
         """,
-        (tenant_id, search_term, start, end),
+        (
+            tenant_id,
+            search_term,
+            campaign_id,
+            campaign_id,
+            ad_group_id,
+            ad_group_id,
+            start,
+            end,
+        ),
     ).fetchone()
     return _window_from_row(row)
 

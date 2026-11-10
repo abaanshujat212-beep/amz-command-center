@@ -79,3 +79,46 @@ def test_approved_action_runs_read_apply_audit_and_verification_seam(monkeypatch
         EventType.VERIFICATION_RESULT,
         EventType.VERIFICATION_TERMINAL,
     ]
+
+
+def test_drift_is_audited_and_provider_write_never_runs(monkeypatch):
+    now = dt.datetime(2026, 1, 20, tzinfo=dt.timezone.utc)
+    action = sm.Action(
+        id="action-drift",
+        tenant_id="tenant-1",
+        entity_type="keyword",
+        entity_id="keyword-1",
+        action_type="set_bid",
+        before_value={"value": 1.0},
+        after_value={"value": 1.1},
+        requested_at=now - dt.timedelta(minutes=1),
+        status=sm.Status.PENDING,
+        idempotency_key="idempotency-drift",
+    )
+    sm.approve(action, approver_id="admin-1", approver_role="admin", now=now)
+
+    class ChangedAds(FakeAds):
+        def keyword_bid(self, keyword_id):
+            self.calls.append(("read", keyword_id))
+            return {"value": 0.9}
+
+        def update_bid(self, keyword_id, value, *, dry_run):
+            raise AssertionError("drift must block before provider write")
+
+    events = []
+    monkeypatch.setattr("services.actions.worker.append_event", lambda _conn, event: events.append(event))
+    conn = FakeConn()
+    ads = ChangedAds()
+    record_apply_start(conn, action, correlation_key="run-drift")
+    updated, response = apply_action(
+        action,
+        AdsActionClient(ads, "LIVE_READY", "AUTHORIZED_LIVE_WRITE"),
+        now=now,
+    )
+    persist_apply_result(conn, updated, response, correlation_key="run-drift")
+
+    assert updated.status is sm.Status.FAILED
+    assert updated.error.startswith("drift:")
+    assert response is None
+    assert ads.calls == [("read", "keyword-1")]
+    assert events[-1].event_type is EventType.DRIFT_BLOCKED

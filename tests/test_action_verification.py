@@ -7,6 +7,7 @@ from services.actions.verification import (
     MetricWindow,
     _mature,
     judge,
+    performance_window,
     placement_window,
     verify_action,
     verify_horizon,
@@ -60,6 +61,33 @@ def test_placement_window_splits_entity_id():
     result = placement_window(conn, "t1", "c1:top_of_search", dt.date(2026, 8, 1), dt.date(2026, 8, 8))
     assert result.cost == 10
     assert conn.queries[0][1][1:3] == ("c1", "top_of_search")
+
+
+def test_negative_keyword_verification_is_limited_to_proposal_destination():
+    conn = FakeConn([{"cost": 10, "sales": 20, "clicks": 11, "orders": 1}])
+    action = sm.Action(
+        id="negative-1",
+        tenant_id="t1",
+        entity_type="search_term",
+        entity_id="bad query",
+        action_type="add_negative_exact",
+        before_value=None,
+        after_value={
+            "value": None,
+            "destination": {"campaign_id": "c1", "ad_group_id": "g1"},
+        },
+        status=sm.Status.APPLIED,
+        applied_at=dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc),
+        idempotency_key="negative-idem",
+    )
+    result = performance_window(
+        conn, action, dt.date(2026, 8, 1), dt.date(2026, 8, 8)
+    )
+    assert result.cost == 10
+    sql, params = conn.queries[0]
+    assert "campaign_id = %s" in sql
+    assert "ad_group_id = %s" in sql
+    assert params[2:6] == ("c1", "c1", "g1", "g1")
 
 
 def test_verify_action_persists_state_and_all_checkpoints(monkeypatch):

@@ -5,6 +5,7 @@ from services.actions.worker import (
     DryRunActionClient,
     WorkerResult,
     apply_action,
+    fetch_approved,
     finish_worker_run,
     persist_action_failure_alert,
     persist_auth_failure_alert,
@@ -46,6 +47,9 @@ class FakeConn:
     def fetchone(self):
         return self.rows[0] if self.rows else None
 
+    def fetchall(self):
+        return self.rows
+
 
 def _approved_action():
     return sm.Action(
@@ -86,6 +90,14 @@ def test_start_worker_run_records_running_action_worker_dataset():
     conn = FakeConn([{"id": "run-1"}])
     assert start_worker_run(conn, "T1") == "run-1"
     assert conn.queries[0][1] == ("T1", "action_worker")
+
+
+def test_approved_action_claim_uses_skip_locked_to_prevent_double_dispatch():
+    conn = FakeConn()
+    assert fetch_approved(conn, "T1", 10) == []
+    sql, params = conn.queries[0]
+    assert "for update skip locked" in sql.lower()
+    assert params == ("T1", 10)
 
 
 def test_finish_worker_run_records_success_summary():
