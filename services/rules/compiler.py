@@ -39,7 +39,9 @@ COMPARISONS = {"<": "<", "<=": "<=", ">": ">", ">=": ">=", "==": "=", "!=": "<>"
 ARITHMETIC = {"+": "+", "-": "-", "*": "*", "/": "/"}
 LOGICAL = {"and": "and", "or": "or"}
 OPS = set(COMPARISONS) | set(ARITHMETIC) | set(LOGICAL) | {"not"}
-MUTATION_KEYS = ("op", "factor", "delta", "delta_pct", "value", "match_type", "level")
+MUTATION_KEYS = (
+    "op", "factor", "delta", "delta_pct", "value", "match_type", "level", "bid_source"
+)
 
 
 class RuleValidationError(ValueError):

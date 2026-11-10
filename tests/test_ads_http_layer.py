@@ -52,6 +52,76 @@ def test_call_uses_catalogued_url_and_json_body(monkeypatch):
     assert calls[0][0] == "POST"
     assert calls[0][1] == "https://advertising-api-eu.amazon.com/sp/keywords/list"
     assert calls[0][2]["json"] == {"maxResults": 1}
+    assert calls[0][2]["headers"]["Content-Type"] == "application/vnd.spKeyword.v3+json"
+    assert calls[0][2]["headers"]["Accept"] == "application/vnd.spKeyword.v3+json"
+
+
+def test_exact_keyword_duplicate_check_scans_all_pages(monkeypatch):
+    c = client()
+    calls = []
+    pages = [
+        {"keywords": [{"keywordText": "other", "matchType": "EXACT", "state": "ENABLED"}], "nextToken": "next"},
+        {"keywords": [{"keywordText": "Hook   and Loop Tape", "matchType": "EXACT", "state": "PAUSED"}]},
+    ]
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        return pages.pop(0)
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    assert c.exact_keyword_exists("g-1", "hook and loop tape")
+    assert calls == [
+        ("ads.keywords.list", {"maxResults": 500, "adGroupIdFilter": {"include": ["g-1"]}}),
+        ("ads.keywords.list", {"maxResults": 500, "adGroupIdFilter": {"include": ["g-1"]}, "nextToken": "next"}),
+    ]
+
+
+def test_create_keyword_uses_exact_v3_payload_and_preflights_duplicate(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        return {"keywords": []}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    monkeypatch.setattr(c, "exact_keyword_exists", lambda ad_group_id, term: False)
+    result = c.create_keyword(
+        campaign_id="c-1", ad_group_id="g-1", keyword_text=" hook tape ", bid=0.42,
+        match_type="exact", dry_run=False,
+    )
+    assert result == {"keywords": []}
+    assert calls == [("ads.keywords.create", {"keywords": [{
+        "campaignId": "c-1", "adGroupId": "g-1", "keywordText": "hook tape",
+        "matchType": "EXACT", "state": "ENABLED", "bid": 0.42,
+    }]})]
+
+
+def test_create_keyword_duplicate_preflight_prevents_write(monkeypatch):
+    c = client()
+    writes = []
+    monkeypatch.setattr(c, "exact_keyword_exists", lambda *_: True)
+    monkeypatch.setattr(c, "_call_mutating", lambda *args, **kwargs: writes.append(args))
+    with pytest.raises(RuntimeError, match="already exists"):
+        c.create_keyword(campaign_id="c-1", ad_group_id="g-1", keyword_text="hook tape", bid=0.42, dry_run=False)
+    assert writes == []
+
+
+def test_create_keyword_rejects_partial_api_errors(monkeypatch):
+    c = client()
+    monkeypatch.setattr(c, "exact_keyword_exists", lambda *_: False)
+    monkeypatch.setattr(c, "_call_mutating", lambda *args, **kwargs: {"keywords": {"error": [{"message": "invalid bid"}]}})
+    with pytest.raises(RuntimeError, match="rejected keyword creation"):
+        c.create_keyword(campaign_id="c-1", ad_group_id="g-1", keyword_text="hook tape", bid=0.42, dry_run=False)
+
+
+@pytest.mark.parametrize("bid", [0, -0.1, float("inf"), float("nan")])
+def test_create_keyword_requires_finite_positive_bid(bid):
+    with pytest.raises(ValueError, match="finite positive"):
+        client().create_keyword(
+            campaign_id="c-1", ad_group_id="g-1", keyword_text="hook tape", bid=bid
+        )
 
 
 def test_target_bid_never_uses_keyword_endpoint(monkeypatch):

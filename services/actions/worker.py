@@ -76,6 +76,15 @@ class AdsActionClient:
             return self.ads.keyword_bid(action.entity_id)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.target_bid(action.entity_id)
+        if action.action_type == "create_keyword" and action.entity_type == "search_term":
+            destination = action.after_value.get("destination") or {}
+            ad_group_id = str(destination.get("ad_group_id") or "")
+            match_type = str(destination.get("match_type") or "").lower()
+            if match_type != "exact" or not ad_group_id:
+                raise RuntimeError("keyword harvest requires an exact destination ad group")
+            if self.ads.exact_keyword_exists(ad_group_id, action.entity_id):
+                raise RuntimeError("exact keyword already exists in destination ad group")
+            return None
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
@@ -97,6 +106,18 @@ class AdsActionClient:
             return self.ads.update_bid(action.entity_id, float(value), dry_run=False)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(value), dry_run=False)
+        if action.action_type == "create_keyword" and action.entity_type == "search_term":
+            destination = action.after_value.get("destination") or {}
+            if str(destination.get("match_type") or "").lower() != "exact":
+                raise RuntimeError("only exact keyword harvest is supported")
+            return self.ads.create_keyword(
+                campaign_id=str(destination.get("campaign_id") or ""),
+                ad_group_id=str(destination.get("ad_group_id") or ""),
+                keyword_text=action.entity_id,
+                match_type="EXACT",
+                bid=float(value),
+                dry_run=False,
+            )
         if action.action_type == "set_placement_modifier":
             return self.ads.update_placement_modifier(
                 action.entity_id,

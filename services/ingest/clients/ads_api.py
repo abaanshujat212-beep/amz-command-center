@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import math
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -12,6 +13,23 @@ import httpx
 from packages.shared import endpoints as ep
 from packages.shared.marketplaces import DEFAULT, Marketplace
 from services.ingest.clients import rate_limit
+
+_ADS_MEDIA_TYPES = {
+    "ads.campaigns.list": "application/vnd.spCampaign.v3+json",
+    "ads.campaigns.update": "application/vnd.spCampaign.v3+json",
+    "ads.adGroups.list": "application/vnd.spAdGroup.v3+json",
+    "ads.adGroups.update": "application/vnd.spAdGroup.v3+json",
+    "ads.keywords.list": "application/vnd.spKeyword.v3+json",
+    "ads.keywords.create": "application/vnd.spKeyword.v3+json",
+    "ads.keywords.update": "application/vnd.spKeyword.v3+json",
+    "ads.targets.list": "application/vnd.spTargetingClause.v3+json",
+    "ads.targets.update": "application/vnd.spTargetingClause.v3+json",
+    "ads.negativeKeywords.create": "application/vnd.spNegativeKeyword.v3+json",
+}
+
+
+def _normalize_keyword(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 class LookbackExceeded(ValueError):
@@ -104,7 +122,11 @@ class AdsClient:
 
     def _request_once(self, endpoint_key: str, *, body: dict | None = None, **path_params: str) -> httpx.Response:
         endpoint = ep.endpoint(endpoint_key)
-        kwargs: dict[str, Any] = {"headers": self.headers(), "timeout": self.timeout_s}
+        headers = self.headers()
+        media_type = _ADS_MEDIA_TYPES.get(endpoint_key, "application/json")
+        headers["Content-Type"] = media_type
+        headers["Accept"] = media_type
+        kwargs: dict[str, Any] = {"headers": headers, "timeout": self.timeout_s}
         if body is not None:
             kwargs["json"] = body
         return httpx.request(endpoint.method.upper(), self.url(endpoint_key, **path_params), **kwargs)
@@ -221,13 +243,90 @@ class AdsClient:
             body={"campaigns": [{"campaignId": campaign_id, "budget": {"budget": amount}}]},
         )
 
-    def list_keywords(self, campaign_ids: list[str] | None = None, keyword_ids: list[str] | None = None) -> dict:
+    def list_keywords(
+        self,
+        campaign_ids: list[str] | None = None,
+        keyword_ids: list[str] | None = None,
+        ad_group_ids: list[str] | None = None,
+        next_token: str | None = None,
+    ) -> dict:
         body: dict = {"maxResults": 500}
         if campaign_ids:
             body["campaignIdFilter"] = {"include": campaign_ids}
         if keyword_ids:
             body["keywordIdFilter"] = {"include": keyword_ids}
+        if ad_group_ids:
+            body["adGroupIdFilter"] = {"include": ad_group_ids}
+        if next_token:
+            body["nextToken"] = next_token
         return self._call("ads.keywords.list", body=body)
+
+    def exact_keyword_exists(self, ad_group_id: str, keyword_text: str) -> bool:
+        """Page through one ad group and compare normalized exact keywords locally."""
+        expected = _normalize_keyword(keyword_text)
+        next_token = None
+        pages = 0
+        while True:
+            result = self.list_keywords(ad_group_ids=[ad_group_id], next_token=next_token)
+            rows = result.get("keywords") or result.get("keywordResponse") or []
+            if any(
+                _normalize_keyword(str(row.get("keywordText") or "")) == expected
+                and str(row.get("matchType") or "").upper() == "EXACT"
+                and str(row.get("state") or "").upper() in {"ENABLED", "PAUSED"}
+                for row in rows
+            ):
+                return True
+            next_token = result.get("nextToken") or result.get("next_token")
+            if not next_token:
+                return False
+            pages += 1
+            if pages >= 1000:
+                raise RuntimeError("keyword duplicate check exceeded 1000 Ads API pages")
+
+    def create_keyword(
+        self,
+        *,
+        campaign_id: str,
+        ad_group_id: str,
+        keyword_text: str,
+        bid: float,
+        match_type: str = "EXACT",
+        dry_run: bool = True,
+    ) -> dict:
+        text = " ".join(keyword_text.split())
+        normalized_match = match_type.strip().upper()
+        amount = float(bid)
+        if not campaign_id or not ad_group_id or not text:
+            raise ValueError("campaign, ad group, and keyword text are required")
+        if normalized_match != "EXACT":
+            raise ValueError("only exact keyword creation is supported")
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError("keyword bid must be a finite positive amount")
+        if dry_run:
+            return {
+                "status": "WOULD_DO", "campaign_id": campaign_id, "ad_group_id": ad_group_id,
+                "keyword_text": text, "match_type": normalized_match, "bid": amount,
+            }
+        if self.exact_keyword_exists(ad_group_id, text):
+            raise RuntimeError(f"exact keyword already exists in destination ad group {ad_group_id}")
+        result = self._call_mutating(
+            "ads.keywords.create",
+            body={"keywords": [{
+                "campaignId": campaign_id,
+                "adGroupId": ad_group_id,
+                "keywordText": text,
+                "matchType": normalized_match,
+                "state": "ENABLED",
+                "bid": amount,
+            }]},
+        )
+        keyword_result = result.get("keywords") if isinstance(result, dict) else None
+        errors = []
+        if isinstance(keyword_result, dict):
+            errors = keyword_result.get("error") or keyword_result.get("errors") or []
+        if errors:
+            raise RuntimeError(f"Amazon Ads rejected keyword creation: {errors}")
+        return result
 
     def list_targets(self, target_ids: list[str] | None = None) -> dict:
         body: dict = {"maxResults": 500}

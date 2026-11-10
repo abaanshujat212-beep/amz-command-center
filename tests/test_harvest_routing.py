@@ -1,3 +1,5 @@
+import pytest
+
 from services.rules.harvest import (
     DUPLICATE_TARGET,
     ROUTE_CONFLICT,
@@ -9,6 +11,7 @@ from services.rules.harvest import (
     classify_brand,
     destination_match_type,
     normalize_term,
+    resolve_harvest_bid,
     select_route,
 )
 
@@ -98,6 +101,22 @@ def test_product_and_brand_routes():
         _candidate("B07XYZ1234"), [_route("pat", match_type="product"), _route("kw")]
     )
     assert product.route.code == "pat"
+
+
+def test_harvest_bid_uses_settled_cpc_and_tenant_bounds():
+    bid, clamped = resolve_harvest_bid(0.4, "cpc_x_1_15", min_bid=0.02, max_bid=5.0)
+    assert bid == 0.46 and not clamped
+    assert resolve_harvest_bid(0.01, "cpc_x_1_15", min_bid=0.05, max_bid=5.0) == (0.05, True)
+    assert resolve_harvest_bid(8.0, "cpc_x_1_15", min_bid=0.02, max_bid=2.0) == (2.0, True)
+
+
+@pytest.mark.parametrize(
+    ("cpc", "source"),
+    [(None, "cpc_x_1_15"), (0, "cpc_x_1_15"), (float("nan"), "cpc_x_1_15"), (0.4, "unknown")],
+)
+def test_harvest_bid_fails_closed_without_valid_source_evidence(cpc, source):
+    with pytest.raises(ValueError):
+        resolve_harvest_bid(cpc, source, min_bid=0.02, max_bid=5.0)
     own = select_route(
         _candidate("axaty tape"),
         [_route("defense", funnel_purpose="brand_defense", brand_class="own_brand"),

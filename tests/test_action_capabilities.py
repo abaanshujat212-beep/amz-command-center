@@ -12,6 +12,15 @@ def test_unknown_capability_is_false_by_default():
     assert capability("campaign", "delete") == ActionCapability()
 
 
+def test_keyword_harvest_is_approval_gated_and_explicitly_non_reversible():
+    item = capability("search_term", "create_keyword")
+    assert item.recommendation_supported
+    assert item.approval_supported
+    assert item.live_baseline_read_supported
+    assert item.live_apply_supported
+    assert not item.rollback_supported
+
+
 def test_local_diagnostic_is_recommendation_only():
     item = capability("search_term", "flag")
     assert item.recommendation_supported

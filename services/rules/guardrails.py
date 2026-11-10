@@ -61,6 +61,7 @@ class Guard(str, Enum):
     DUPLICATE_TARGET = "duplicate_target"
     HARVEST_ROUTE_MISSING = "harvest_route_missing"
     HARVEST_ROUTE_CONFLICT = "harvest_route_conflict"
+    UNSUPPORTED_ACTION = "unsupported_action"
 
 
 @dataclass(frozen=True)

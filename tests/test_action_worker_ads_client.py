@@ -16,6 +16,15 @@ class FakeAds:
         self.calls.append(("read_bid", keyword_id))
         return {"value": 1.0}
 
+    def exact_keyword_exists(self, ad_group_id, keyword_text):
+        self.calls.append(("keyword_exists", ad_group_id, keyword_text))
+        return False
+
+    def create_keyword(self, **kwargs):
+        self.exact_keyword_exists(kwargs["ad_group_id"], kwargs["keyword_text"])
+        self.calls.append(("create_keyword", kwargs))
+        return {"ok": True}
+
     def target_bid(self, target_id):
         self.calls.append(("read_target_bid", target_id))
         return {"value": 0.8}
@@ -126,6 +135,53 @@ def test_target_bid_uses_target_read_and_update_endpoints():
         ("read_target_bid", "k1"),
         ("target_bid", "k1", 1.25, False),
     ]
+
+
+def test_exact_keyword_harvest_rechecks_duplicates_and_creates_in_routed_group():
+    ads = FakeAds()
+    harvest = action("create_keyword", "search_term")
+    harvest.entity_id = "hook and loop tape"
+    harvest.before_value = None
+    harvest.after_value = {
+        "value": 0.42,
+        "destination": {
+            "campaign_id": "c1", "ad_group_id": "g1", "match_type": "exact", "route_code": "generic_exact"
+        },
+    }
+    client = live_client(ads)
+
+    assert client.read_before_value(harvest) is None
+    assert client.apply(harvest) == {"ok": True}
+    assert ads.calls == [
+        ("keyword_exists", "g1", "hook and loop tape"),
+        ("keyword_exists", "g1", "hook and loop tape"),
+        ("create_keyword", {
+            "campaign_id": "c1", "ad_group_id": "g1", "keyword_text": "hook and loop tape",
+            "match_type": "EXACT", "bid": 0.42, "dry_run": False,
+        }),
+    ]
+
+
+def test_keyword_harvest_blocks_product_routes_and_existing_targets():
+    ads = FakeAds()
+    harvest = action("create_keyword", "search_term")
+    harvest.before_value = None
+    harvest.after_value = {"value": 0.42, "destination": {"ad_group_id": "g1", "match_type": "product"}}
+    try:
+        live_client(ads).read_before_value(harvest)
+    except RuntimeError as exc:
+        assert "exact destination" in str(exc)
+    else:
+        raise AssertionError("product targets must not be sent through keyword creation")
+
+    harvest.after_value["destination"]["match_type"] = "exact"
+    ads.exact_keyword_exists = lambda *_: True
+    try:
+        live_client(ads).read_before_value(harvest)
+    except RuntimeError as exc:
+        assert "already exists" in str(exc)
+    else:
+        raise AssertionError("existing exact keyword must block the action")
 
 
 def test_unsupported_live_action_fails_before_any_ads_call():

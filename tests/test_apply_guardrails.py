@@ -140,3 +140,18 @@ def test_budget_increase_uses_current_daily_cap():
             enabled(max_budget_increase_per_day=50),
             now=NOW,
         )
+
+
+def test_keyword_harvest_bid_is_rechecked_against_current_tenant_bounds():
+    harvest = action(action_type="create_keyword", before=None, after=0.42)
+    harvest.entity_type = "search_term"
+    harvest.after_value = {
+        "value": 0.42,
+        "destination": {"campaign_id": "C1", "ad_group_id": "G1", "match_type": "exact"},
+    }
+    validate_apply_guardrails(Cursor(evidence()), harvest, enabled(), now=NOW)
+
+    with pytest.raises(ApplyGuardrailError, match="outside current tenant bid bounds"):
+        validate_apply_guardrails(
+            Cursor(evidence()), harvest, enabled(max_bid=0.3), now=NOW
+        )

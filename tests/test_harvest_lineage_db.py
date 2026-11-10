@@ -157,7 +157,7 @@ def test_harvest_routes_dedupes_records_lineage_and_isolates_tenants():
             assert by_term["axaty tape"]["blocked_by"] == "harvest_route_missing"
 
             lineage = admin.execute(
-                "select l.*, a.after_value from search_term_harvest_lineage l"
+                "select l.*, a.before_value, a.after_value from search_term_harvest_lineage l"
                 " join action a on a.id=l.action_id where l.tenant_id=%s",
                 (tenant_a,),
             ).fetchall()
@@ -169,6 +169,8 @@ def test_harvest_routes_dedupes_records_lineage_and_isolates_tenants():
             assert (row["asin"], row["brand_class"], row["funnel_purpose"]) == (
                 "B000TEST01", "generic", "performance")
             assert row["after_value"]["destination"]["route_code"] == "generic_exact"
+            assert row["before_value"] is None
+            assert row["after_value"]["value"] == 0.57
             with pytest.raises(psycopg.errors.RaiseException):
                 admin.execute(
                     "update search_term_harvest_lineage set routing_reason='x' where id=%s",

@@ -111,7 +111,7 @@ ENDPOINTS: dict[str, Endpoint] = dict(
         _e("ads.campaigns.update", Api.ADS, "PUT", "/sp/campaigns", "Update campaign budget, state, or placement bid adjustments.", mutates=True, scope="advertising::campaign_management", notes="There is no separate placement endpoint: placement modifiers are a field on the campaign (dynamicBidding.placementBidding). See ADR 005."),
         _e("ads.adGroups.update", Api.ADS, "PUT", "/sp/adGroups", "Update ad group state or default bid.", mutates=True, scope="advertising::campaign_management"),
         _e("ads.keywords.update", Api.ADS, "PUT", "/sp/keywords", "Update keyword bid or state.", mutates=True, scope="advertising::campaign_management"),
-        _e("ads.keywords.create", Api.ADS, "POST", "/sp/keywords", "Create keywords (search-term harvesting).", mutates=True, scope="advertising::campaign_management"),
+        _e("ads.keywords.create", Api.ADS, "POST", "/sp/keywords", "Create exact Sponsored Products keywords after an ad-group duplicate preflight.", mutates=True, scope="advertising::campaign_management", notes="Uses the SP v3 keyword media type. Current live support is approval-gated exact keyword harvest only; rollback is unsupported."),
         _e("ads.targets.update", Api.ADS, "PUT", "/sp/targets", "Update product/auto targeting expressions.", mutates=True, scope="advertising::campaign_management"),
         _e("ads.negativeKeywords.create", Api.ADS, "POST", "/sp/negativeKeywords", "Add negative exact / negative phrase keywords.", mutates=True, scope="advertising::campaign_management", notes="Cheapest irreversible-feeling action: easy to add, easy to forget, and it suppresses traffic silently. Always logged with the search term that caused it."),
     ]
