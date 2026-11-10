@@ -79,8 +79,10 @@ class AdsActionClient:
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
-        if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
-            return self.ads.campaign_status(action.entity_id)
+        if action.action_type in {"pause", "enable"}:
+            return self.ads.entity_status(action.entity_type, action.entity_id)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.ad_group_default_bid(action.entity_id)
         if action.action_type == "set_budget" and action.entity_type == "campaign":
             return self.ads.campaign_budget(action.entity_id)
         raise NotImplementedError(
@@ -103,9 +105,11 @@ class AdsActionClient:
                 float(action.before_value["value"]) if action.before_value else None,
                 dry_run=False,
             )
-        if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
+        if action.action_type in {"pause", "enable"}:
             state = "PAUSED" if action.action_type == "pause" else "ENABLED"
-            return self.ads.update_campaign_status(action.entity_id, state, dry_run=False)
+            return self.ads.update_entity_status(action.entity_type, action.entity_id, state, dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.update_ad_group_default_bid(action.entity_id, float(value), dry_run=False)
         if action.action_type == "set_budget" and action.entity_type == "campaign":
             return self.ads.update_campaign_budget(action.entity_id, float(value), dry_run=False)
         raise NotImplementedError(
@@ -121,6 +125,8 @@ class AdsActionClient:
             return self.ads.update_bid(action.entity_id, float(original), dry_run=False)
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(original), dry_run=False)
+        if action.action_type == "set_bid" and action.entity_type == "ad_group":
+            return self.ads.update_ad_group_default_bid(action.entity_id, float(original), dry_run=False)
         if action.action_type == "set_placement_modifier" and action.entity_type == "campaign":
             placement = str(action.before_value.get("placement") or action.after_value["placement"])
             current = self.ads.placement_modifier(action.entity_id, placement)
@@ -137,8 +143,8 @@ class AdsActionClient:
                 float(current_value),
                 dry_run=False,
             )
-        if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
-            return self.ads.update_campaign_status(action.entity_id, str(original), dry_run=False)
+        if action.action_type in {"pause", "enable"}:
+            return self.ads.update_entity_status(action.entity_type, action.entity_id, str(original), dry_run=False)
         if action.action_type == "set_budget" and action.entity_type == "campaign":
             return self.ads.update_campaign_budget(action.entity_id, float(original), dry_run=False)
         raise NotImplementedError(
