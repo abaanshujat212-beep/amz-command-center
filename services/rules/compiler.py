@@ -130,7 +130,9 @@ def resolve_action(action: dict, current_value: float | None) -> float | None:
     if kind in DIAGNOSTIC_ACTIONS:
         _assert_diagnostic_is_inert(action)
         return None
-    if kind in ("pause", "enable", "add_negative_exact", "add_negative_phrase"):
+    if kind in (
+        "pause", "enable", "add_negative_exact", "add_negative_phrase", "add_negative_product"
+    ):
         return None
     op = action.get("op")
     if op is None and kind == "create_keyword":

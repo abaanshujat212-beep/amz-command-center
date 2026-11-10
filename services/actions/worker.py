@@ -95,6 +95,13 @@ class AdsActionClient:
             if self.ads.negative_keyword_exists(campaign_id, ad_group_id, action.entity_id):
                 raise RuntimeError("duplicate or conflicting negative keyword exists at destination")
             return None
+        if action.action_type == "add_negative_product" and action.entity_type == "campaign":
+            asin = str(action.after_value.get("asin") or "")
+            if not action.entity_id or not action.after_value.get("ad_group_id"):
+                raise RuntimeError("negative product target requires an explicit campaign and ad group")
+            if self.ads.negative_product_target_exists(action.entity_id, asin):
+                raise RuntimeError("negative product target already exists in the campaign")
+            return None
         if action.action_type == "set_placement_modifier":
             placement = str(action.after_value["placement"])
             return self.ads.placement_modifier(action.entity_id, placement)
@@ -142,6 +149,16 @@ class AdsActionClient:
                 ad_group_id=str(destination.get("ad_group_id") or "") or None,
                 keyword_text=action.entity_id,
                 match_type=match_type,
+                dry_run=False,
+            )
+        if action.action_type == "add_negative_product" and action.entity_type == "campaign":
+            phrase = required_confirmation(action.entity_type, action.action_type)
+            if phrase and action.approval_confirmation != phrase:
+                raise RuntimeError("negative product targeting requires explicit approval confirmation")
+            return self.ads.create_negative_product_target(
+                campaign_id=action.entity_id,
+                ad_group_id=str(action.after_value.get("ad_group_id") or "") or None,
+                asin=str(action.after_value.get("asin") or ""),
                 dry_run=False,
             )
         if action.action_type == "set_placement_modifier":

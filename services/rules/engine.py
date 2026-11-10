@@ -228,6 +228,7 @@ def evaluate_tenant(
                     )
                 harvest = None
                 negative_destination = None
+                negative_asin = None
                 if rule["scope"] == "search_term" and action_type == "create_keyword":
                     harvest = plan_harvest(
                         cur,
@@ -290,6 +291,21 @@ def evaluate_tenant(
                             "source_campaign_id": str(campaign_id),
                             "source_ad_group_id": str(ad_group_id) if ad_group_id else None,
                         }
+                if action_type == "add_negative_product":
+                    configured_asin = str(rule["action_jsonb"].get("asin") or "").strip().upper()
+                    configured_ad_group = str(rule["action_jsonb"].get("ad_group_id") or "").strip()
+                    if (
+                        rule["scope"] != "campaign"
+                        or len(configured_asin) != 10
+                        or not configured_asin.isalnum()
+                        or not configured_ad_group
+                    ):
+                        decision.block(
+                            gr.Guard.UNSUPPORTED_ACTION,
+                            "negative product target requires a campaign rule, ad group, and 10-character ASIN",
+                        )
+                    else:
+                        negative_asin = configured_asin
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
@@ -313,6 +329,8 @@ def evaluate_tenant(
                             "value": decision.value if decision.allowed else None,
                             "clamped": decision.clamped,
                         }
+                if negative_asin is not None:
+                    metrics["negative_product_asin"] = negative_asin
                 reason = render_reason(
                     rule["action_jsonb"].get("reason_template", rule["code"]),
                     metrics,
@@ -332,6 +350,9 @@ def evaluate_tenant(
                 proposed_action = {"type": action_type, "value": decision.value}
                 if negative_destination is not None:
                     proposed_action["destination"] = negative_destination
+                if negative_asin is not None:
+                    proposed_action["asin"] = negative_asin
+                    proposed_action["ad_group_id"] = str(rule["action_jsonb"]["ad_group_id"])
                 if harvest is not None and harvest.destination:
                     proposed_action["destination"] = harvest.destination
                 if action_type == "create_keyword":
@@ -373,7 +394,17 @@ def evaluate_tenant(
                     s.block(decision.blocked_by)
                 else:
                     # Existing action remains the one authoritative approval queue.
-                    before_payload = None if action_type == "create_keyword" else {"value": current}
+                    before_payload = (
+                        None
+                        if action_type
+                        in {
+                            "create_keyword",
+                            "add_negative_exact",
+                            "add_negative_phrase",
+                            "add_negative_product",
+                        }
+                        else {"value": current}
+                    )
                     after_payload = {"value": decision.value}
                     if diagnostic:
                         after_payload["diagnostic"] = True
@@ -382,6 +413,9 @@ def evaluate_tenant(
                     if action_type == "create_keyword":
                         after_payload["bid_source"] = rule["action_jsonb"].get("bid_source")
                         after_payload["source_cpc"] = float(row["cpc"]) if row.get("cpc") is not None else None
+                    if negative_asin is not None:
+                        after_payload["asin"] = negative_asin
+                        after_payload["ad_group_id"] = str(rule["action_jsonb"]["ad_group_id"])
                     cur.execute(
                         "insert into action (tenant_id, rule_id, evaluation_id,entity_type,entity_id,action_type,"
                         " before_value,after_value,reason_text,clamped,clamp_note,idempotency_key,recommendation_type,"

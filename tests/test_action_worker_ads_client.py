@@ -27,6 +27,10 @@ class FakeAds:
         self.calls.append(("negative_exists", campaign_id, ad_group_id, keyword_text))
         return False
 
+    def negative_product_target_exists(self, campaign_id, asin):
+        self.calls.append(("negative_product_exists", campaign_id, asin))
+        return False
+
     def create_keyword(self, **kwargs):
         self.exact_keyword_exists(kwargs["ad_group_id"], kwargs["keyword_text"])
         self.calls.append(("create_keyword", kwargs))
@@ -34,6 +38,10 @@ class FakeAds:
 
     def create_negative_keyword(self, **kwargs):
         self.calls.append(("create_negative_keyword", kwargs))
+        return {"ok": True}
+
+    def create_negative_product_target(self, **kwargs):
+        self.calls.append(("create_negative_product_target", kwargs))
         return {"ok": True}
 
     def target_bid(self, target_id):
@@ -112,6 +120,7 @@ def action(action_type="set_bid", entity_type="keyword"):
             "create_keyword": "CREATE KEYWORD",
             "add_negative_exact": "ADD NEGATIVE EXACT",
             "add_negative_phrase": "ADD NEGATIVE PHRASE",
+            "add_negative_product": "ADD NEGATIVE PRODUCT TARGET",
         }.get(action_type),
     )
 
@@ -365,6 +374,35 @@ def test_negative_keyword_without_confirmation_fails_before_write():
     a.after_value["destination"] = {"campaign_id": "c1", "ad_group_id": "g1"}
     with pytest.raises(RuntimeError, match="explicit approval confirmation"):
         live_client(ads).apply(a)
+    assert ads.calls == []
+
+
+def test_negative_product_target_requires_confirmation_and_duplicate_preflight():
+    ads = FakeAds()
+    a = action("add_negative_product", "campaign")
+    a.entity_id = "c1"
+    a.after_value["asin"] = "B012345678"
+    a.after_value["ad_group_id"] = "g1"
+    client = live_client(ads)
+    assert client.read_before_value(a) is None
+    assert client.apply(a) == {"ok": True}
+    assert ads.calls == [
+        ("negative_product_exists", "c1", "B012345678"),
+        (
+            "create_negative_product_target",
+            {
+                "campaign_id": "c1",
+                "ad_group_id": "g1",
+                "asin": "B012345678",
+                "dry_run": False,
+            },
+        ),
+    ]
+
+    ads.calls.clear()
+    a.approval_confirmation = None
+    with pytest.raises(RuntimeError, match="explicit approval confirmation"):
+        client.apply(a)
     assert ads.calls == []
 
 
