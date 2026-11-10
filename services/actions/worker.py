@@ -242,7 +242,8 @@ def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
                after_value, status, approved_by, approved_at, applied_at, idempotency_key,
                control_id, request_origin, approval_confirmation
           from action where tenant_id = %s and status = 'approved'
-         order by approved_at nulls first, requested_at limit %s""",
+         order by approved_at nulls first, requested_at limit %s
+         for update skip locked""",
         (tenant_id, limit),
     ).fetchall()
     return [_to_action(r) for r in rows]
