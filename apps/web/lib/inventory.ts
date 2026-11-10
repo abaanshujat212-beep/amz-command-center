@@ -74,3 +74,58 @@ export async function inventorySnapshotRead(
 		freshness: { ...counts, thresholdHours: options.freshHours, ready: total > 0 && counts.stale === 0 && counts.partial === 0 && counts.unknown === 0 },
 	}
 }
+
+export async function inventoryForecastRead(client: PoolClient, tenantId: string, freshHours: number) {
+	const rows = await query<{
+		sku: string; available_qty: number | null; observed_at: string; freshness_state: string;
+		units_ordered: number; observed_days: number; loaded_at: string;
+	}>(client, `
+		with latest_position as (
+			select distinct on (s.location_id,s.sku) s.sku,s.available_qty,s.observed_at,
+				s.freshness_state
+			from inventory_position_snapshot s
+			join inventory_location l on l.id=s.location_id and l.tenant_id=s.tenant_id and l.active
+			where s.tenant_id=$1
+			order by s.location_id,s.sku,s.observed_at desc,s.id desc
+		), position_by_sku as (
+			select sku,sum(available_qty) available_qty,max(observed_at) observed_at,
+				bool_or(freshness_state <> 'current') source_not_current
+			from latest_position group by sku
+		), sales as (
+			select coalesce(record->>'sku',record->>'sellerSku') sku,report_date,
+				coalesce((coalesce(record->>'units_ordered',record->>'unitsOrdered'))::numeric,0) units_ordered,
+				loaded_at
+			from raw.raw_sales_traffic_asin_daily
+			where tenant_id=$1 and report_date >= current_date-30 and report_date < current_date
+				and coalesce(record->>'sku',record->>'sellerSku') is not null
+		), demand_by_sku as (
+			select sku,sum(units_ordered) units_30d,count(distinct report_date)::int observed_days,
+				max(loaded_at) loaded_at from sales group by sku
+		)
+		select p.sku,p.available_qty,p.observed_at::text observed_at,
+			case when p.source_not_current then 'partial'
+				when p.observed_at > now() then 'unknown'
+				when p.observed_at < now()-($2::int*interval '1 hour') then 'stale'
+				else 'current' end freshness_state,
+			coalesce(d.units_30d,0)::int units_ordered,coalesce(d.observed_days,0)::int observed_days,
+			coalesce(d.loaded_at::text,'') loaded_at
+		from position_by_sku p left join demand_by_sku d using(sku) order by p.sku`, [tenantId, freshHours])
+	return rows.map(row => {
+		const blockers: string[] = []
+		if (row.available_qty === null) blockers.push("available_now_unknown")
+		if (row.observed_days < 14) blockers.push("sparse_demand_history")
+		if (row.freshness_state !== "current") blockers.push(`inventory_${row.freshness_state}`)
+		const avgDailyDemand = row.observed_days >= 14 ? row.units_ordered / 30 : null
+		const daysOfSupply = avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
+		return {
+			sku: row.sku, status: blockers.length ? "blocked" : "ready", blockers,
+			assumptions: { demandWindowDays: 30, observedSalesDays: row.observed_days,
+				salesLoadedAt: row.loaded_at || null, inventoryObservedAt: row.observed_at,
+				seasonality: "not_applied", leadTime: "not_configured" },
+			availableNow: row.available_qty, averageDailyDemand: avgDailyDemand,
+			daysOfSupply, projectedStockoutDay: daysOfSupply === null ? null :
+				new Date(Date.now() + daysOfSupply * 86400000).toISOString().slice(0, 10),
+			confidence: blockers.length ? 0 : Math.min(1, row.observed_days / 30),
+		}
+	})
+}
