@@ -419,6 +419,24 @@ def apply_action(
 ) -> tuple[sm.Action, dict | None]:
     try:
         live_before = client.read_before_value(action)
+        if (
+            live_before is not None
+            and action.before_value is not None
+            and live_before != action.before_value
+        ):
+            return (
+                sm.apply(
+                    action,
+                    now=now,
+                    live_before_value=action.before_value,
+                    api_ok=False,
+                    error=(
+                        f"drift: live value {live_before} no longer matches the proposed baseline "
+                        f"{action.before_value}; requires re-evaluation"
+                    ),
+                ),
+                None,
+            )
         response = client.apply(action)
     except Exception as exc:
         return sm.apply(

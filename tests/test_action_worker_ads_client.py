@@ -5,7 +5,7 @@ import pytest
 
 from packages.shared.action_capabilities import capability
 from services.actions import state_machine as sm
-from services.actions.worker import AdsActionClient, persist_rotated_refresh_token
+from services.actions.worker import AdsActionClient, apply_action, persist_rotated_refresh_token
 
 
 class FakeAds:
@@ -294,6 +294,23 @@ def test_campaign_budget_reads_applies_and_restores_live_value():
         ("campaign_budget", "c1", 24.0, False),
         ("campaign_budget", "c1", 20.0, False),
     ]
+
+
+def test_campaign_budget_drift_blocks_write_before_apply():
+    ads = FakeAds()
+
+    def changed_budget(campaign_id):
+        ads.calls.append(("read_campaign_budget", campaign_id))
+        return {"value": 19.0}
+
+    ads.campaign_budget = changed_budget
+    a = action("set_budget", "campaign")
+    a.entity_id = "c1"
+    updated, response = apply_action(a, live_client(ads), now=dt.datetime.now(dt.timezone.utc))
+    assert updated.status == sm.Status.FAILED
+    assert updated.error.startswith("drift:")
+    assert response is None
+    assert ads.calls == [("read_campaign_budget", "c1")]
 
 
 def test_ad_group_default_bid_reads_applies_and_restores_live_value():

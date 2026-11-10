@@ -218,7 +218,10 @@ class AdsClient:
                 value = budget
             if value is None:
                 raise RuntimeError(f"campaign {campaign_id} response did not include budget")
-            return {"value": float(value)}
+            amount = float(value)
+            if not math.isfinite(amount) or amount <= 0:
+                raise RuntimeError(f"campaign {campaign_id} response included an invalid budget")
+            return {"value": amount}
         raise RuntimeError(f"campaign {campaign_id} was not returned by Ads API")
 
     def update_campaign_status(self, campaign_id: str, status: str, *, dry_run: bool = True) -> dict:
@@ -234,14 +237,24 @@ class AdsClient:
 
     def update_campaign_budget(self, campaign_id: str, budget: float, *, dry_run: bool = True) -> dict:
         amount = float(budget)
-        if amount <= 0:
-            raise ValueError("campaign budget must be greater than zero")
+        if not campaign_id or not math.isfinite(amount) or amount <= 0:
+            raise ValueError("campaign id and a finite positive budget are required")
         if dry_run:
             return {"status": "WOULD_DO", "campaign_id": campaign_id, "budget": amount}
-        return self._call_mutating(
+        result = self._call_mutating(
             "ads.campaigns.update",
             body={"campaigns": [{"campaignId": campaign_id, "budget": {"budget": amount}}]},
         )
+        payload = result.get("campaigns") if isinstance(result, dict) else None
+        errors = (payload.get("error") or payload.get("errors") or []) if isinstance(payload, dict) else []
+        if errors:
+            first = errors[0] if isinstance(errors, list) else errors
+            if isinstance(first, dict):
+                code = first.get("code") or first.get("errorCode") or "unknown"
+                message = first.get("details") or first.get("message") or "request rejected"
+                raise RuntimeError(f"Amazon Ads rejected campaign budget update ({code}): {message}")
+            raise RuntimeError("Amazon Ads rejected campaign budget update")
+        return result
 
     def list_keywords(
         self,
