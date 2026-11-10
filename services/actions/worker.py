@@ -81,6 +81,8 @@ class AdsActionClient:
             return self.ads.placement_modifier(action.entity_id, placement)
         if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
             return self.ads.campaign_status(action.entity_id)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.campaign_budget(action.entity_id)
         raise NotImplementedError(
             f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}. "
             "No verified live read/apply/rollback implementation exists."
@@ -104,6 +106,8 @@ class AdsActionClient:
         if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
             state = "PAUSED" if action.action_type == "pause" else "ENABLED"
             return self.ads.update_campaign_status(action.entity_id, state, dry_run=False)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.update_campaign_budget(action.entity_id, float(value), dry_run=False)
         raise NotImplementedError(
             f"Live Ads action is intentionally blocked: {action.entity_type}/{action.action_type}"
         )
@@ -135,6 +139,8 @@ class AdsActionClient:
             )
         if action.action_type in {"pause", "enable"} and action.entity_type == "campaign":
             return self.ads.update_campaign_status(action.entity_id, str(original), dry_run=False)
+        if action.action_type == "set_budget" and action.entity_type == "campaign":
+            return self.ads.update_campaign_budget(action.entity_id, float(original), dry_run=False)
         raise NotImplementedError(
             f"Ads rollback not wired yet: {action.entity_type}/{action.action_type}"
         )
