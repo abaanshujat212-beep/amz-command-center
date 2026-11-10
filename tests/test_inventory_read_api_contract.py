@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ROUTE = (ROOT / "apps/web/app/api/inventory/route.ts").read_text()
 LIB = (ROOT / "apps/web/lib/inventory.ts").read_text()
