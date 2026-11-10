@@ -95,9 +95,34 @@ def test_campaign_status_read_and_update_use_campaign_contract(monkeypatch):
     ]
 
 
+def test_campaign_budget_read_and_update_use_campaign_contract(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.campaigns.list":
+            return {"campaigns": [{"campaignId": "c-1", "budget": {"budget": 20.0}}]}
+        return {"ok": True}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    assert c.campaign_budget("c-1") == {"value": 20.0}
+    assert c.update_campaign_budget("c-1", 24.0, dry_run=False) == {"ok": True}
+    assert calls == [
+        ("ads.campaigns.list", {"maxResults": 500, "campaignIdFilter": {"include": ["c-1"]}}),
+        ("ads.campaigns.update", {"campaigns": [{"campaignId": "c-1", "budget": {"budget": 24.0}}]}),
+    ]
+
+
 def test_campaign_status_update_rejects_unknown_states():
     with pytest.raises(ValueError, match="ENABLED or PAUSED"):
         client().update_campaign_status("c-1", "ARCHIVED", dry_run=False)
+
+
+def test_campaign_budget_update_rejects_nonpositive_amount():
+    with pytest.raises(ValueError, match="greater than zero"):
+        client().update_campaign_budget("c-1", 0, dry_run=False)
 
 
 def test_call_retries_429_retry_after(monkeypatch):
