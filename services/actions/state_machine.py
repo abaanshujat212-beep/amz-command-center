@@ -21,6 +21,8 @@ import datetime as dt
 from dataclasses import dataclass
 from enum import Enum
 
+from packages.shared.action_capabilities import required_confirmation
+
 
 class Status(str, Enum):
     PENDING = "pending"
@@ -77,6 +79,7 @@ class Action:
     idempotency_key: str | None = None
     control_id: str | None = None
     request_origin: str = "automation"
+    approval_confirmation: str | None = None
 
     @property
     def expires_at(self) -> dt.datetime:
@@ -96,12 +99,16 @@ def approve(
     approver_role: str,
     now: dt.datetime,
     allow_self_approval: bool = False,
+    confirmation: str | None = None,
 ) -> Action:
     _assert(action, Status.APPROVED)
     if approver_role not in APPROVER_ROLES:
         raise TransitionError(f"role '{approver_role}' cannot approve actions")
     if now > action.expires_at:
         raise TransitionError("proposal expired; re-evaluate against fresh data")
+    phrase = required_confirmation(action.entity_type, action.action_type)
+    if phrase and confirmation != phrase:
+        raise TransitionError(f"type {phrase} to confirm this non-reversible action")
     if (
         not allow_self_approval
         and action.requested_by is not None
@@ -112,6 +119,7 @@ def approve(
     action.status = Status.APPROVED
     action.approved_by = approver_id
     action.approved_at = now
+    action.approval_confirmation = confirmation if phrase else None
     return action
 
 
@@ -209,4 +217,5 @@ def retry(action: Action) -> Action:
     action.error = None
     action.approved_by = None
     action.approved_at = None
+    action.approval_confirmation = None
     return action

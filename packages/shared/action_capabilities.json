@@ -24,7 +24,8 @@
     "live_apply_supported": true,
     "rollback_supported": false,
     "verification_supported": true,
-    "local_only": false
+    "local_only": false,
+    "confirmation_phrase": "CREATE KEYWORD"
   },
   "campaign:set_placement_modifier": {
     "recommendation_supported": true,

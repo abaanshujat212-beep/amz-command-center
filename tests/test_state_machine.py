@@ -98,6 +98,21 @@ def test_self_approval_allowed_when_tenant_opts_in():
     assert a.status is Status.APPROVED
 
 
+def test_non_reversible_action_requires_and_records_typed_confirmation():
+    a = make(entity_type="search_term", action_type="create_keyword")
+    with pytest.raises(TransitionError, match="CREATE KEYWORD"):
+        approve(a, approver_id="u-owner", approver_role="owner", now=NOW)
+
+    approve(
+        a,
+        approver_id="u-owner",
+        approver_role="owner",
+        now=NOW,
+        confirmation="CREATE KEYWORD",
+    )
+    assert a.approval_confirmation == "CREATE KEYWORD"
+
+
 # ---------------------------------------------------------------- expiry
 def test_stale_proposal_cannot_be_approved():
     a = make(requested_at=NOW - dt.timedelta(hours=60))
@@ -131,9 +146,10 @@ def test_api_failure_is_recorded_not_swallowed():
 
 
 def test_failed_action_can_be_retried():
-    a = make(status=Status.FAILED, error="429 throttled")
+    a = make(status=Status.FAILED, error="429 throttled", entity_type="search_term", action_type="create_keyword", approval_confirmation="CREATE KEYWORD")
     retry(a)
     assert a.status is Status.PENDING and a.error is None
+    assert a.approval_confirmation is None
 
 
 # ---------------------------------------------------------- verification

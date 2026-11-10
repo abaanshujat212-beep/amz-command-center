@@ -9,11 +9,11 @@ type Params = { params: Promise<{ id: string }> }
 export async function POST(request: Request, { params }: Params) {
 	const actor = await currentContext()
 	const { id } = await params
-	const body = await request.json().catch(() => ({})) as { decision?: unknown }
+	const body = await request.json().catch(() => ({})) as { decision?: unknown; confirmation?: unknown }
 	const decision = body.decision === "approved" || body.decision === "rejected" ? body.decision : null
 	if (!decision) return NextResponse.json({ error: "decision must be approved or rejected" }, { status: 400 })
 	try {
-		await decideAction({ tenantId: actor.tenantId, userId: actor.userId, role: actor.role, actionId: id, decision })
+		await decideAction({ tenantId: actor.tenantId, userId: actor.userId, role: actor.role, actionId: id, decision, confirmation: typeof body.confirmation === "string" ? body.confirmation : "" })
 		return NextResponse.json({ ok: true, id, decision })
 	} catch (err) {
 		if (err instanceof ApprovalDecisionError) return NextResponse.json({ error: err.message }, { status: err.status })

@@ -1,6 +1,9 @@
 import datetime as dt
 from types import SimpleNamespace
 
+import pytest
+
+from packages.shared.action_capabilities import capability
 from services.actions import state_machine as sm
 from services.actions.worker import AdsActionClient, persist_rotated_refresh_token
 
@@ -97,6 +100,7 @@ def action(action_type="set_bid", entity_type="keyword"):
         after_value={"value": 1.25},
         status=sm.Status.APPROVED,
         approved_at=dt.datetime.now(dt.timezone.utc),
+        approval_confirmation="CREATE KEYWORD" if action_type == "create_keyword" else None,
     )
 
 
@@ -160,6 +164,25 @@ def test_exact_keyword_harvest_rechecks_duplicates_and_creates_in_routed_group()
             "match_type": "EXACT", "bid": 0.42, "dry_run": False,
         }),
     ]
+
+
+def test_exact_keyword_creation_requires_typed_approval_before_mutation():
+    ads = FakeAds()
+    harvest = action("create_keyword", "search_term")
+    harvest.approval_confirmation = None
+    harvest.before_value = None
+    harvest.after_value = {
+        "value": 0.42,
+        "destination": {"campaign_id": "c1", "ad_group_id": "g1", "match_type": "exact"},
+    }
+
+    try:
+        live_client(ads).apply(harvest)
+    except RuntimeError as exc:
+        assert "explicit approval confirmation" in str(exc)
+    else:
+        raise AssertionError("non-reversible keyword creation must require typed confirmation")
+    assert ads.calls == []
 
 
 def test_keyword_harvest_blocks_product_routes_and_existing_targets():
@@ -306,6 +329,37 @@ def test_keyword_status_reads_applies_and_restores_live_state():
         ("entity_status", "keyword", "k1", "PAUSED", False),
         ("entity_status", "keyword", "k1", "ENABLED", False),
     ]
+
+
+@pytest.mark.parametrize(
+    ("entity_type", "action_type", "before", "after"),
+    [
+        ("keyword", "set_bid", {"value": 1.0}, {"value": 1.2}),
+        ("target", "set_bid", {"value": 0.8}, {"value": 1.0}),
+        ("campaign", "set_placement_modifier", {"value": 15.0, "placement": "PLACEMENT_TOP"}, {"value": 30.0, "placement": "PLACEMENT_TOP"}),
+        ("campaign", "pause", {"value": "ENABLED"}, {"value": "PAUSED"}),
+        ("campaign", "enable", {"value": "PAUSED"}, {"value": "ENABLED"}),
+        ("campaign", "set_budget", {"value": 20.0}, {"value": 24.0}),
+        ("ad_group", "set_bid", {"value": 0.75}, {"value": 0.9}),
+        ("ad_group", "pause", {"value": "ENABLED"}, {"value": "PAUSED"}),
+        ("ad_group", "enable", {"value": "PAUSED"}, {"value": "ENABLED"}),
+        ("keyword", "pause", {"value": "ENABLED"}, {"value": "PAUSED"}),
+        ("keyword", "enable", {"value": "PAUSED"}, {"value": "ENABLED"}),
+        ("target", "pause", {"value": "ENABLED"}, {"value": "PAUSED"}),
+        ("target", "enable", {"value": "PAUSED"}, {"value": "ENABLED"}),
+    ],
+)
+def test_every_reversible_live_capability_has_a_worker_rollback_route(
+    entity_type, action_type, before, after
+):
+    assert capability(entity_type, action_type).rollback_supported
+    ads = FakeAds()
+    item = action(action_type, entity_type)
+    item.before_value = before
+    item.after_value = after
+
+    assert live_client(ads).rollback(item) == {"ok": True}
+    assert ads.calls
 
 
 def test_persist_rotated_refresh_token_writes_ciphertext(monkeypatch):

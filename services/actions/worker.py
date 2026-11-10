@@ -12,7 +12,7 @@ from typing import Protocol
 import psycopg
 from psycopg.rows import dict_row
 
-from packages.shared.action_capabilities import assert_worker_capability
+from packages.shared.action_capabilities import assert_worker_capability, required_confirmation
 from services.actions import state_machine as sm
 from services.actions.apply_guardrails import ApplyGuardrailError, validate_apply_guardrails
 from services.actions.audit import EventType, append_event, event_for, sanitize
@@ -107,6 +107,9 @@ class AdsActionClient:
         if action.action_type == "set_bid" and action.entity_type == "target":
             return self.ads.update_target_bid(action.entity_id, float(value), dry_run=False)
         if action.action_type == "create_keyword" and action.entity_type == "search_term":
+            phrase = required_confirmation(action.entity_type, action.action_type)
+            if phrase and action.approval_confirmation != phrase:
+                raise RuntimeError("irreversible keyword creation requires explicit approval confirmation")
             destination = action.after_value.get("destination") or {}
             if str(destination.get("match_type") or "").lower() != "exact":
                 raise RuntimeError("only exact keyword harvest is supported")
@@ -189,6 +192,7 @@ def _to_action(row: dict) -> sm.Action:
         idempotency_key=row["idempotency_key"],
         control_id=str(row["control_id"]) if row["control_id"] else None,
         request_origin=row["request_origin"],
+        approval_confirmation=row.get("approval_confirmation"),
     )
 
 
@@ -196,7 +200,7 @@ def fetch_approved(conn, tenant_id: str, limit: int) -> list[sm.Action]:
     rows = conn.execute(
         """select id, tenant_id, entity_type, entity_id, action_type, before_value,
                after_value, status, approved_by, approved_at, applied_at, idempotency_key,
-               control_id, request_origin
+               control_id, request_origin, approval_confirmation
           from action where tenant_id = %s and status = 'approved'
          order by approved_at nulls first, requested_at limit %s""",
         (tenant_id, limit),

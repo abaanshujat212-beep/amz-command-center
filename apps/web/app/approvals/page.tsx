@@ -1,4 +1,4 @@
-import { withTenant } from "@/lib/db"
+import { query, withTenant } from "@/lib/db"
 import { money } from "@/lib/format"
 import { pendingActions, type PendingAction } from "@/lib/queries"
 import { canApprove, currentTenantId } from "@/lib/session"
@@ -36,9 +36,11 @@ function hoursLeft(expiresAt: string): number {
 	)
 }
 
-function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
+type AdsReadiness = { readiness_state: string; verification_level: string | null }
+
+function Row({ a, armed, readiness }: { a: PendingAction; armed: boolean; readiness: AdsReadiness | null }) {
 	const left = hoursLeft(a.expires_at)
-	const live = liveActionSupport(a.entity_type, a.action_type)
+	const live = liveActionSupport(a.entity_type, a.action_type, readiness?.readiness_state, readiness?.verification_level ?? undefined)
 	return (
 		<li className="rounded-lg border border-slate-200 bg-white p-4">
 			<div className="flex flex-wrap items-start justify-between gap-4">
@@ -77,6 +79,7 @@ function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 				<div className="flex shrink-0 gap-2">
 					<form action={approveAction}>
 						<input type="hidden" name="id" value={a.id} />
+						{live.capability.confirmation_phrase && <label className="block text-xs text-amber-800">Non-reversible action: type {live.capability.confirmation_phrase}<input required name="confirmation" autoComplete="off" className="mt-1 block w-44 rounded border border-amber-400 px-2 py-1" /></label>}
 						<button
 							type="submit"
 							disabled={!armed || !live.supported}
@@ -103,7 +106,11 @@ function Row({ a, armed }: { a: PendingAction; armed: boolean }) {
 
 export default async function Approvals() {
 	const tenantId = await currentTenantId()
-	const actions = await withTenant(tenantId, (c) => pendingActions(c, 100))
+	const { actions, readiness } = await withTenant(tenantId, async (c) => {
+		const actions = await pendingActions(c, 100)
+		const states = await query<AdsReadiness>(c, "select readiness_state, metadata->>'verification_level' as verification_level from external_dependency_state where module_key='ppc' and dependency_key='amazon_ads' order by updated_at desc limit 1")
+		return { actions, readiness: states[0] ?? null }
+	})
 	const armed = await canApprove()
 
 	return (
@@ -138,7 +145,7 @@ export default async function Approvals() {
 			) : (
 				<ul className="space-y-3">
 					{actions.map((a) => (
-						<Row key={a.id} a={a} armed={armed} />
+						<Row key={a.id} a={a} armed={armed} readiness={readiness} />
 					))}
 				</ul>
 			)}

@@ -12,7 +12,7 @@ export async function approveAction(formData: FormData): Promise<void> {
 	if (role !== "owner" && role !== "admin") throw new Error("Only tenant owners and admins can approve Amazon actions.")
 	// Keep the live-action support gate visible here as well as in the shared helper.
 	void liveActionSupport
-	await decideAction({ tenantId, userId, role, actionId: String(formData.get("id")), decision: "approved" })
+	await decideAction({ tenantId, userId, role, actionId: String(formData.get("id")), decision: "approved", confirmation: String(formData.get("confirmation") ?? "") })
 	revalidatePath("/approvals")
 	revalidatePath("/recommendations")
 	revalidatePath(`/recommendations/${String(formData.get("id"))}`)

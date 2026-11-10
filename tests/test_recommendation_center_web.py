@@ -19,6 +19,7 @@ def test_recommendation_center_surfaces_operator_evidence_and_safety():
         assert text in detail
     assert "live_baseline_read_supported" in detail
     assert "rollback_supported" in detail
+    assert "confirmation_phrase" in detail
     assert "verification_supported" in detail
 
 
