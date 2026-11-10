@@ -88,8 +88,13 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 			where s.tenant_id=$1
 			order by s.location_id,s.sku,s.observed_at desc,s.id desc
 		), position_by_sku as (
-			select sku,sum(available_qty) available_qty,max(observed_at) observed_at,
-				bool_or(freshness_state <> 'current') source_not_current
+			select sku,
+				case when bool_or(available_qty is null) then null else sum(available_qty) end available_qty,
+				min(observed_at) observed_at,
+				bool_or(freshness_state = 'unknown' or observed_at > now()) source_unknown,
+				bool_or(freshness_state = 'stale'
+					or observed_at < now()-($2::int*interval '1 hour')) source_stale,
+				bool_or(freshness_state = 'partial') source_partial
 			from latest_position group by sku
 		), sales as (
 			select coalesce(record->>'sku',record->>'sellerSku') sku,report_date,
@@ -103,9 +108,9 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 				max(loaded_at) loaded_at from sales group by sku
 		)
 		select p.sku,p.available_qty,p.observed_at::text observed_at,
-			case when p.source_not_current then 'partial'
-				when p.observed_at > now() then 'unknown'
-				when p.observed_at < now()-($2::int*interval '1 hour') then 'stale'
+			case when p.source_unknown then 'unknown'
+				when p.source_stale then 'stale'
+				when p.source_partial then 'partial'
 				else 'current' end freshness_state,
 			coalesce(d.units_30d,0)::int units_ordered,coalesce(d.observed_days,0)::int observed_days,
 			coalesce(d.loaded_at::text,'') loaded_at
