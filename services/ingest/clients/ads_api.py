@@ -24,6 +24,7 @@ _ADS_MEDIA_TYPES = {
     "ads.keywords.update": "application/vnd.spKeyword.v3+json",
     "ads.targets.list": "application/vnd.spTargetingClause.v3+json",
     "ads.targets.update": "application/vnd.spTargetingClause.v3+json",
+    "ads.negativeKeywords.list": "application/vnd.spNegativeKeyword.v3+json",
     "ads.negativeKeywords.create": "application/vnd.spNegativeKeyword.v3+json",
 }
 
@@ -346,6 +347,94 @@ class AdsClient:
         if target_ids:
             body["targetIdFilter"] = {"include": target_ids}
         return self._call("ads.targets.list", body=body)
+
+    def list_negative_keywords(
+        self,
+        *,
+        campaign_id: str,
+        ad_group_id: str | None = None,
+        next_token: str | None = None,
+    ) -> dict:
+        body: dict = {"maxResults": 500, "campaignIdFilter": {"include": [campaign_id]}}
+        if ad_group_id:
+            body["adGroupIdFilter"] = {"include": [ad_group_id]}
+        if next_token:
+            body["nextToken"] = next_token
+        return self._call("ads.negativeKeywords.list", body=body)
+
+    def negative_keyword_exists(
+        self, campaign_id: str, ad_group_id: str | None, keyword_text: str
+    ) -> bool:
+        expected = _normalize_keyword(keyword_text)
+        next_token = None
+        pages = 0
+        while True:
+            result = self.list_negative_keywords(
+                campaign_id=campaign_id, next_token=next_token
+            )
+            rows = result.get("negativeKeywords") or result.get("negativeKeywordResponse") or []
+            if any(
+                str(row.get("campaignId")) == str(campaign_id)
+                and (
+                    not ad_group_id
+                    or not row.get("adGroupId")
+                    or str(row.get("adGroupId")) == str(ad_group_id)
+                )
+                and _normalize_keyword(str(row.get("keywordText") or "")) == expected
+                and str(row.get("matchType") or "").upper()
+                in {"NEGATIVE_EXACT", "NEGATIVE_PHRASE", "EXACT", "PHRASE"}
+                and str(row.get("state") or "").upper() in {"ENABLED", "PAUSED"}
+                for row in rows
+            ):
+                return True
+            next_token = result.get("nextToken") or result.get("next_token")
+            if not next_token:
+                return False
+            pages += 1
+            if pages >= 1000:
+                raise RuntimeError("negative keyword duplicate check exceeded 1000 Ads API pages")
+
+    def create_negative_keyword(
+        self,
+        *,
+        campaign_id: str,
+        ad_group_id: str | None,
+        keyword_text: str,
+        match_type: str,
+        dry_run: bool = True,
+    ) -> dict:
+        text = " ".join(keyword_text.split())
+        normalized_match = match_type.strip().upper()
+        if not campaign_id or not text or normalized_match not in {"EXACT", "PHRASE"}:
+            raise ValueError("campaign, keyword text, and exact or phrase match type are required")
+        if dry_run:
+            return {
+                "status": "WOULD_DO",
+                "campaign_id": campaign_id,
+                "ad_group_id": ad_group_id,
+                "keyword_text": text,
+                "match_type": f"NEGATIVE_{normalized_match}",
+            }
+        if self.negative_keyword_exists(campaign_id, ad_group_id, text):
+            raise RuntimeError("negative keyword already exists at the selected destination")
+        row = {
+            "campaignId": campaign_id,
+            "keywordText": text,
+            "matchType": f"NEGATIVE_{normalized_match}",
+            "state": "ENABLED",
+        }
+        if ad_group_id:
+            row["adGroupId"] = ad_group_id
+        result = self._call_mutating(
+            "ads.negativeKeywords.create", body={"negativeKeywords": [row]}
+        )
+        payload = result.get("negativeKeywords") if isinstance(result, dict) else None
+        errors = (payload.get("error") or payload.get("errors") or []) if isinstance(payload, dict) else []
+        if errors:
+            first = errors[0] if isinstance(errors, list) else errors
+            code = first.get("errorCode") or first.get("code") or "unknown" if isinstance(first, dict) else "unknown"
+            raise RuntimeError(f"Amazon Ads rejected negative keyword creation ({code})")
+        return result
 
     @staticmethod
     def _read_entity_state(rows: list[dict], entity_id: str, id_field: str, kind: str) -> dict:

@@ -227,6 +227,7 @@ def evaluate_tenant(
                         f"{ownership.state} control {ownership.control_id}: {ownership.reason}",
                     )
                 harvest = None
+                negative_destination = None
                 if rule["scope"] == "search_term" and action_type == "create_keyword":
                     harvest = plan_harvest(
                         cur,
@@ -258,6 +259,37 @@ def evaluate_tenant(
                                 )
                         except (TypeError, ValueError) as exc:
                             decision.block(gr.Guard.BOUNDS, str(exc))
+
+                if action_type in {"add_negative_exact", "add_negative_phrase"}:
+                    level = str(rule["action_jsonb"].get("level") or "ad_group")
+                    campaign_count = int(row.get("source_campaign_count") or 0)
+                    ad_group_count = int(row.get("source_ad_group_count") or 0)
+                    campaign_id = row.get("source_campaign_id")
+                    ad_group_id = row.get("source_ad_group_id")
+                    if rule["scope"] != "search_term" or level not in {"campaign", "ad_group"}:
+                        decision.block(
+                            gr.Guard.UNSUPPORTED_ACTION,
+                            "negative keywords require a search-term rule with campaign or ad-group level",
+                        )
+                    elif campaign_count != 1 or not campaign_id:
+                        decision.block(
+                            gr.Guard.UNSUPPORTED_ACTION,
+                            "negative keyword destination is ambiguous across campaigns",
+                        )
+                    elif level == "ad_group" and (ad_group_count != 1 or not ad_group_id):
+                        decision.block(
+                            gr.Guard.UNSUPPORTED_ACTION,
+                            "negative keyword destination is ambiguous across ad groups",
+                        )
+                    else:
+                        negative_destination = {
+                            "campaign_id": str(campaign_id),
+                            "ad_group_id": str(ad_group_id) if level == "ad_group" else None,
+                            "level": level,
+                            "source_search_term": key[1],
+                            "source_campaign_id": str(campaign_id),
+                            "source_ad_group_id": str(ad_group_id) if ad_group_id else None,
+                        }
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
                 metrics["source_freshness"] = freshness.as_dict()
@@ -298,6 +330,8 @@ def evaluate_tenant(
                 )
                 contract = metadata.as_dict()
                 proposed_action = {"type": action_type, "value": decision.value}
+                if negative_destination is not None:
+                    proposed_action["destination"] = negative_destination
                 if harvest is not None and harvest.destination:
                     proposed_action["destination"] = harvest.destination
                 if action_type == "create_keyword":

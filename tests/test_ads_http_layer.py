@@ -282,6 +282,98 @@ def test_campaign_budget_update_rejects_nonpositive_amount():
         client().update_campaign_budget("c-1", 0, dry_run=False)
 
 
+def test_negative_keyword_create_uses_v3_payload_and_duplicate_preflight(monkeypatch):
+    c = client()
+    calls = []
+
+    def fake_call(endpoint, body=None, **params):
+        calls.append((endpoint, body))
+        if endpoint == "ads.negativeKeywords.list":
+            return {
+                "negativeKeywords": [
+                    {
+                        "campaignId": "c-1",
+                        "adGroupId": "g-1",
+                        "keywordText": "other",
+                        "matchType": "NEGATIVE_PHRASE",
+                        "state": "ENABLED",
+                    }
+                ]
+            }
+        return {"negativeKeywords": {"success": [{"keywordId": "n-1"}]}}
+
+    monkeypatch.setattr(c, "_call", fake_call)
+    monkeypatch.setattr(c, "_call_mutating", fake_call)
+    result = c.create_negative_keyword(
+        campaign_id="c-1", ad_group_id="g-1", keyword_text=" bad query ",
+        match_type="exact", dry_run=False,
+    )
+    assert result["negativeKeywords"]["success"][0]["keywordId"] == "n-1"
+    assert calls == [
+        (
+            "ads.negativeKeywords.list",
+            {"maxResults": 500, "campaignIdFilter": {"include": ["c-1"]}},
+        ),
+        (
+            "ads.negativeKeywords.create",
+            {"negativeKeywords": [{"campaignId": "c-1", "keywordText": "bad query",
+                                   "matchType": "NEGATIVE_EXACT", "state": "ENABLED",
+                                   "adGroupId": "g-1"}]},
+        ),
+    ]
+
+
+def test_negative_keyword_duplicate_and_unsupported_match_fail_closed(monkeypatch):
+    c = client()
+    monkeypatch.setattr(
+        c,
+        "list_negative_keywords",
+        lambda **kwargs: {
+            "negativeKeywords": [{
+                "campaignId": "c-1", "adGroupId": "g-1",
+                "keywordText": "bad query", "matchType": "NEGATIVE_PHRASE", "state": "ENABLED",
+            }]
+        },
+    )
+    with pytest.raises(RuntimeError, match="already exists"):
+        c.create_negative_keyword(
+            campaign_id="c-1", ad_group_id="g-1", keyword_text="BAD  QUERY",
+            match_type="exact", dry_run=False,
+        )
+    with pytest.raises(ValueError, match="exact or phrase"):
+        c.create_negative_keyword(
+            campaign_id="c-1", ad_group_id="g-1", keyword_text="bad query",
+            match_type="broad", dry_run=False,
+        )
+
+
+def test_campaign_level_negative_conflicts_with_ad_group_destination():
+    c = client()
+    monkeypatch_result = {
+        "negativeKeywords": [{
+            "campaignId": "c-1", "keywordText": "bad query",
+            "matchType": "NEGATIVE_EXACT", "state": "ENABLED",
+        }]
+    }
+    c.list_negative_keywords = lambda **kwargs: monkeypatch_result
+    assert c.negative_keyword_exists("c-1", "g-1", "bad query")
+
+
+@pytest.mark.parametrize("endpoint", ["ads.keywords.create", "ads.negativeKeywords.create"])
+def test_non_idempotent_entity_creation_is_not_retried_after_provider_error(monkeypatch, endpoint):
+    calls = []
+
+    def fake_request(method, url, **kwargs):
+        calls.append((method, url))
+        return response(500, json={"message": "uncertain provider outcome"}, url=url)
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+    monkeypatch.setattr("time.sleep", lambda _seconds: pytest.fail("create call must not retry"))
+    with pytest.raises(httpx.HTTPStatusError):
+        client()._call(endpoint, body={})
+    assert len(calls) == 1
+
+
 def test_call_retries_429_retry_after(monkeypatch):
     responses = [
         response(429, headers={"Retry-After": "0"}),
