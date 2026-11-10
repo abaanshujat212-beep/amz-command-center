@@ -297,7 +297,7 @@ def evaluate_tenant(
                     proposed_action["destination"] = harvest.destination
                 if action_type == "create_keyword":
                     proposed_action["bid_source"] = rule["action_jsonb"].get("bid_source")
-                    proposed_action["source_cpc"] = row.get("cpc")
+                    proposed_action["source_cpc"] = float(row["cpc"]) if row.get("cpc") is not None else None
 
                 cur.execute(
                     "insert into rule_evaluation (tenant_id, rule_id, run_id,"
@@ -342,7 +342,7 @@ def evaluate_tenant(
                         after_payload["destination"] = harvest.destination
                     if action_type == "create_keyword":
                         after_payload["bid_source"] = rule["action_jsonb"].get("bid_source")
-                        after_payload["source_cpc"] = row.get("cpc")
+                        after_payload["source_cpc"] = float(row["cpc"]) if row.get("cpc") is not None else None
                     cur.execute(
                         "insert into action (tenant_id, rule_id, evaluation_id,entity_type,entity_id,action_type,"
                         " before_value,after_value,reason_text,clamped,clamp_note,idempotency_key,recommendation_type,"
