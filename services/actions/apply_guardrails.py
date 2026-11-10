@@ -104,8 +104,9 @@ def validate_apply_guardrails(
     if evaluated < 0 or matched < 0 or matched > evaluated or min_clicks < 0 or min_impressions < 0:
         raise ApplyGuardrailError("guardrail_context contains impossible counts")
 
-    before = _number((action.before_value or {}).get("value"), "before_value")
-    after = _number(action.after_value.get("value"), "after_value")
+    numeric_action = action.action_type in {"set_bid", "set_budget", "set_placement_modifier"}
+    before = _number((action.before_value or {}).get("value"), "before_value") if numeric_action else None
+    after = _number(action.after_value.get("value"), "after_value") if numeric_action else None
     proposal = gr.Proposal(
         entity_type=action.entity_type,
         entity_id=action.entity_id,
