@@ -15,7 +15,7 @@ function load(relative) {
  m.filename = filename
  m.paths = Module._nodeModulePaths(root)
  const native = m.require.bind(m)
- m.require = name => name.startsWith('@/') ? load(name.slice(2)+'.ts') : name === 'next/link' ? {default: ({children, href, ...props}) => React.createElement('a', {href, ...props}, children)} : native(name)
+ m.require = name => name.startsWith('@/') ? load(name.slice(2)+(fs.existsSync(path.join(root,name.slice(2)+'.ts'))?'.ts':'.tsx')) : name === 'next/link' ? {default: ({children, href, ...props}) => React.createElement('a', {href, ...props}, children)} : native(name)
  loaded.set(filename,m)
  m._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,filename)
  return m.exports
