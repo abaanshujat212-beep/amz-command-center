@@ -1,8 +1,10 @@
 import Link from "next/link"
+import { ManualInventoryForm } from "@/components/manual-inventory-form"
 import { InventoryWorkspace } from "@/components/inventory-workspace"
 import { withTenant } from "@/lib/db"
 import { inventoryForecastRead, inventorySnapshotRead } from "@/lib/inventory"
 import { inventoryFilters, type InventorySearch } from "@/lib/inventory-workspace"
+import { mayManageTenant } from "@/lib/rbac"
 import { currentContext } from "@/lib/session"
 
 export const dynamic = "force-dynamic"
@@ -17,5 +19,6 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 		const visibleSkus = new Set(inventory.snapshots.map(row => row.sku))
 		return { inventory, forecasts: forecasts.filter(row => visibleSkus.has(row.sku)) }
 	})
-	return <InventoryWorkspace {...data} filters={filters} />
+	const locations = [...new Map(data.inventory.snapshots.map(row => [row.locationCode, { locationCode: row.locationCode, locationName: row.locationName }])).values()]
+	return <div className="space-y-6"><InventoryWorkspace {...data} filters={filters} />{mayManageTenant(actor.role) ? <ManualInventoryForm key={actor.tenantId} locations={locations} initialObservedAt={new Date().toISOString()} /> : <p className="text-sm text-slate-500">Your role has read-only inventory access. Ask an owner or admin to record a stock count.</p>}</div>
 }
