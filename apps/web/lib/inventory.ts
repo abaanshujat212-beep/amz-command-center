@@ -31,7 +31,7 @@ export async function inventorySnapshotRead(
 ) {
 	const offset = (options.page - 1) * options.pageSize
 	const filters = [tenantId, options.sku ?? null, options.locationCode ?? null, options.freshHours]
-	const rows = await query<InventorySnapshotView & { total: number }>(client, `
+	const rows = await query<InventorySnapshotView>(client, `
 		with latest as (
 			select distinct on (s.location_id,s.sku)
 				s.id::text snapshot_id,l.id::text location_id,l.location_code,l.display_name location_name,
@@ -49,11 +49,27 @@ export async function inventorySnapshotRead(
 				and ($3::text is null or l.location_code=$3)
 			order by s.location_id,s.sku,s.observed_at desc,s.id desc
 		)
-		select *,count(*) over()::int total from latest
+		select snapshot_id "snapshotId",location_id "locationId",location_code "locationCode",
+			location_name "locationName",location_type "locationType",marketplace_id "marketplaceId",
+			sku,source_type "sourceType",source_provider_id "sourceProviderId",source_reference "sourceReference",
+			observed_at "observedAt",freshness,available_qty "availableQty",on_hand_qty "onHandQty",
+			reserved_qty "reservedQty",inbound_qty "inboundQty",unsellable_qty "unsellableQty",
+			committed_qty "committedQty",in_transit_qty "inTransitQty",expected_available_at "expectedAvailableAt"
+		from latest
 		order by sku,location_code limit $5 offset $6`,
 	[...filters, options.pageSize, offset])
-	const countRows = await query<{ total: number }>(client, `
-		select count(*)::int total from inventory_position_snapshot s
+	const countRows = await query<{
+		total: number; current: number; stale: number; partial: number; unknown: number
+	}>(client, `
+		select count(*)::int total,
+			count(*) filter (where s.freshness_state = 'current' and s.observed_at <= now()
+				and s.observed_at >= now()-($4::int*interval '1 hour'))::int current,
+			count(*) filter (where s.freshness_state = 'stale' or (s.freshness_state = 'current'
+				and s.observed_at < now()-($4::int*interval '1 hour')))::int stale,
+			count(*) filter (where s.freshness_state = 'partial')::int partial,
+			count(*) filter (where s.freshness_state = 'unknown' or (s.freshness_state = 'current'
+				and s.observed_at > now()))::int unknown
+		from inventory_position_snapshot s
 		join inventory_location l on l.id=s.location_id and l.tenant_id=s.tenant_id and l.active
 		where s.tenant_id=$1 and ($2::text is null or s.sku=$2)
 			and ($3::text is null or l.location_code=$3)
@@ -61,17 +77,12 @@ export async function inventorySnapshotRead(
 				select 1 from inventory_position_snapshot newer
 				where newer.tenant_id=s.tenant_id and newer.location_id=s.location_id
 					and newer.sku=s.sku and (newer.observed_at,newer.id)>(s.observed_at,s.id)
-			)`, filters.slice(0, 3))
-	const total = countRows[0]?.total ?? 0
-	const snapshots = rows.map(({ total: _total, ...row }) => row)
-	const counts = snapshots.reduce((result, row) => {
-		result[row.freshness] += 1
-		return result
-	}, { current: 0, stale: 0, partial: 0, unknown: 0 })
+			)`, filters)
+	const { total, ...counts } = countRows[0] ?? { total: 0, current: 0, stale: 0, partial: 0, unknown: 0 }
 	return {
-		snapshots,
+		snapshots: rows,
 		pagination: { page: options.page, pageSize: options.pageSize, total },
-		freshness: { ...counts, thresholdHours: options.freshHours, ready: total > 0 && counts.stale === 0 && counts.partial === 0 && counts.unknown === 0 },
+		freshness: { ...counts, thresholdHours: options.freshHours, ready: total > 0 && counts.current === total },
 	}
 }
 
