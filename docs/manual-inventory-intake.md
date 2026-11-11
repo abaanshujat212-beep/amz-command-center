@@ -41,6 +41,14 @@ Successful responses contain:
 
 Errors return `{ "error": "message" }` with 400 for invalid input, 401 for no session, 403 for insufficient role, 409 for conflicts/tenant selection, 413 for an oversized body, and 415 for the wrong content type.
 
+## History privileges and migration rollback
+
+Migration `0068_inventory_append_only_grants.sql` enforces the history boundary at the database role. Migration `0002_rls.sql` grants SELECT/INSERT/UPDATE/DELETE both to existing public tables and, through `ALTER DEFAULT PRIVILEGES`, to future public tables. The SELECT/INSERT grant in `0067` did not remove those broader defaults.
+
+The additive migration explicitly revokes UPDATE, DELETE and TRUNCATE on snapshots from `axaty_app`, preserving SELECT/INSERT. It also revokes DELETE/TRUNCATE on locations because deleting a location would cascade its snapshot history, while preserving location SELECT/INSERT/UPDATE. Tenant-erasure cascades are unchanged. Existing clients that attempted to mutate inventory history will now receive permission errors and must append new observations instead.
+
+The down migration deliberately restores the prior snapshot UPDATE/DELETE and location DELETE permissions; that rollback weakens history protection and should be used only as an explicit migration rollback. It does not grant TRUNCATE, which was not part of the historical defaults.
+
 ## Validation
 
 From the repository root, after installing web dependencies:

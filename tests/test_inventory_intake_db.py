@@ -59,7 +59,18 @@ def test_manual_intake_is_append_only_and_exact_sql_retry_does_not_overwrite(int
     assert row["on_hand_qty"] is None
     assert row["source_payload"] == {"enteredBy": "actor-1"}
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        db.execute("update inventory_position_snapshot set available_qty=9 where id=%s", (inserted["snapshotId"],))
+        with db.transaction():
+            db.execute("update inventory_position_snapshot set available_qty=9 where id=%s", (inserted["snapshotId"],))
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with db.transaction():
+            db.execute("delete from inventory_position_snapshot where id=%s", (inserted["snapshotId"],))
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with db.transaction():
+            db.execute("delete from inventory_location where id=%s", (location,))
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        with db.transaction():
+            db.execute("truncate inventory_location cascade")
+    assert db.execute("select count(*)::int total from inventory_position_snapshot where id=%s", (inserted["snapshotId"],)).fetchone()["total"] == 1
 
 
 def test_manual_reference_comparison_detects_conflicting_values_and_inactive_location(intake_db):
@@ -92,3 +103,22 @@ def test_manual_intake_reads_remain_tenant_scoped(intake_db):
     db.execute("select set_config('app.tenant_id',%s,true)", (str(other),))
     assert run(db, "LOCATION_SQL", [tenant, "warehouse"]) == []
     assert run(db, "EXISTING_SNAPSHOT_SQL", reference_values(tenant)) == []
+
+
+@pytest.mark.parametrize(
+    ("table", "privilege", "expected"),
+    [("inventory_position_snapshot", "SELECT", True),
+     ("inventory_position_snapshot", "INSERT", True),
+     ("inventory_position_snapshot", "UPDATE", False),
+     ("inventory_position_snapshot", "DELETE", False),
+     ("inventory_position_snapshot", "TRUNCATE", False),
+     ("inventory_location", "SELECT", True),
+     ("inventory_location", "INSERT", True),
+     ("inventory_location", "UPDATE", True),
+     ("inventory_location", "DELETE", False),
+     ("inventory_location", "TRUNCATE", False)],
+)
+def test_inventory_history_privileges_are_explicitly_limited(intake_db, table, privilege, expected):
+    db, _, _ = intake_db
+    row = db.execute("select has_table_privilege(current_user,%s,%s) allowed", (table, privilege)).fetchone()
+    assert row["allowed"] is expected
