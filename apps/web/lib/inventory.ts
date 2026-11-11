@@ -86,14 +86,34 @@ export async function inventorySnapshotRead(
 	}
 }
 
+export type InventoryDemandVelocityWindow = {
+	windowDays: 7 | 14 | 30
+	startDay: string
+	endDay: string
+	observedDays: number
+	missingDays: number
+	coverage: number
+	status: "complete" | "partial" | "no_data" | "invalid"
+	unitsObserved: number | null
+	averageDailyUnitsObserved: number | null
+	invalidRows: number
+	numericRangeExceeded: boolean
+	salesFreshness: "current" | "stale" | "unknown"
+	salesLoadedAt: string | null
+	latestSalesDate: string | null
+}
+
 export async function inventoryForecastRead(client: PoolClient, tenantId: string, freshHours: number) {
 	const rows = await query<{
 		sku: string; available_qty: number | null; observed_at: string; freshness_state: string;
 		average_daily_demand: number | null; observed_days: number; loaded_at: string;
 		invalid_demand_rows: number; sales_freshness: "current" | "stale" | "unknown";
-		latest_sales_date: string | null;
+		latest_sales_date: string | null; numeric_range_exceeded: boolean;
+		velocity_windows: Record<"7d" | "14d" | "30d", InventoryDemandVelocityWindow>;
 	}>(client, `
-		with latest_position as (
+		with forecast_clock as (
+			select (now() at time zone 'UTC')::date as as_of_day
+		), latest_position as (
 			select distinct on (s.location_id,s.sku) s.sku,s.available_qty,s.observed_at,
 				s.freshness_state
 			from inventory_position_snapshot s
@@ -116,17 +136,52 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 					else null end units_ordered,
 				loaded_at
 			from raw.raw_sales_traffic_asin_daily
-			where tenant_id=$1 and report_date >= current_date-30 and report_date < current_date
+			where tenant_id=$1 and report_date >= (select as_of_day from forecast_clock)-30
+				and report_date < (select as_of_day from forecast_clock)
 				and coalesce(record->>'sku',record->>'sellerSku') is not null
+		), daily_sales as (
+			select sku,report_date,
+				case when count(*) filter (where units_ordered is null) > 0 then null
+					else sum(units_ordered) end units_ordered,
+				count(*) filter (where units_ordered is null)::int invalid_rows,
+				max(loaded_at) loaded_at,bool_or(loaded_at > now()) future_load
+			from sales group by sku,report_date
 		), demand_by_sku as (
 			select sku,
-				case when count(*) filter (where units_ordered is null) > 0 then null
-					else sum(units_ordered) / count(distinct report_date) end average_daily_demand,
-				count(distinct report_date)::int observed_days,
-				count(*) filter (where units_ordered is null)::int invalid_demand_rows,
+				case when sum(invalid_rows) > 0 or sum(units_ordered) > 9007199254740991 then null
+					else sum(units_ordered) / count(*) end average_daily_demand,
+				count(*)::int observed_days,sum(invalid_rows)::int invalid_demand_rows,
+				coalesce(sum(units_ordered) > 9007199254740991,false) numeric_range_exceeded,
 				max(report_date) latest_sales_date,
-				max(loaded_at) loaded_at, bool_or(loaded_at > now()) future_load
-			from sales group by sku
+				max(loaded_at) loaded_at,bool_or(future_load) future_load
+			from daily_sales group by sku
+		), velocity_window_stats as (
+			select p.sku,w.window_days,c.as_of_day,
+				count(d.report_date)::int observed_days,coalesce(sum(d.invalid_rows),0)::int invalid_rows,
+				sum(d.units_ordered) units_observed,
+				coalesce(sum(d.units_ordered) > 9007199254740991,false) numeric_range_exceeded,
+				max(d.loaded_at) loaded_at,max(d.report_date) latest_sales_date,
+				coalesce(bool_or(d.future_load),false) future_load
+			from position_by_sku p cross join (values(7),(14),(30)) w(window_days)
+			cross join forecast_clock c left join daily_sales d on d.sku=p.sku
+				and d.report_date >= c.as_of_day-w.window_days and d.report_date < c.as_of_day
+			group by p.sku,w.window_days,c.as_of_day
+		), velocity_by_sku as (
+			select sku,jsonb_object_agg(window_days::text || 'd',jsonb_build_object(
+				'windowDays',window_days,'startDay',(as_of_day-window_days)::text,'endDay',(as_of_day-1)::text,
+				'observedDays',observed_days,'missingDays',window_days-observed_days,
+				'coverage',round(observed_days::numeric/window_days,4),
+				'status',case when invalid_rows > 0 or numeric_range_exceeded then 'invalid'
+					when observed_days=window_days then 'complete' when observed_days>0 then 'partial' else 'no_data' end,
+				'unitsObserved',case when invalid_rows > 0 or numeric_range_exceeded then null else units_observed end,
+				'averageDailyUnitsObserved',case when invalid_rows > 0 or numeric_range_exceeded then null
+					else units_observed/nullif(observed_days,0) end,
+				'invalidRows',invalid_rows,'numericRangeExceeded',numeric_range_exceeded,
+				'salesFreshness',case when loaded_at is null or future_load then 'unknown'
+					when loaded_at < now()-($2::int*interval '1 hour') then 'stale' else 'current' end,
+				'salesLoadedAt',to_char(loaded_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+				'latestSalesDate',latest_sales_date::text
+			)) velocity_windows from velocity_window_stats group by sku
 		)
 		select p.sku,p.available_qty,p.observed_at::text observed_at,
 			case when p.source_unknown then 'unknown'
@@ -134,37 +189,45 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 				when p.source_partial then 'partial'
 				else 'current' end freshness_state,
 			d.average_daily_demand,coalesce(d.observed_days,0)::int observed_days,
+			coalesce(d.numeric_range_exceeded,false) numeric_range_exceeded,v.velocity_windows,
 			coalesce(d.invalid_demand_rows,0)::int invalid_demand_rows,
 			d.latest_sales_date::text latest_sales_date,
 			case when d.loaded_at is null or d.future_load then 'unknown'
 				when d.loaded_at < now()-($2::int*interval '1 hour') then 'stale'
 				else 'current' end sales_freshness,
 			coalesce(d.loaded_at::text,'') loaded_at
-		from position_by_sku p left join demand_by_sku d using(sku) order by p.sku`, [tenantId, freshHours])
+		from position_by_sku p left join demand_by_sku d using(sku)
+		join velocity_by_sku v using(sku) order by p.sku`, [tenantId, freshHours])
 	return rows.map(row => {
 		const blockers: string[] = []
 		if (row.available_qty === null) blockers.push("available_now_unknown")
 		if (row.observed_days < 14) blockers.push("sparse_demand_history")
 		if (row.observed_days < 30) blockers.push("incomplete_demand_history")
 		if (row.invalid_demand_rows > 0) blockers.push("invalid_demand_history")
+		if (row.numeric_range_exceeded) blockers.push("demand_numeric_range_exceeded")
 		if (row.sales_freshness !== "current") blockers.push(`sales_${row.sales_freshness}`)
 		if (row.freshness_state !== "current") blockers.push(`inventory_${row.freshness_state}`)
 		// Gaps are unknown days, never inferred zero sales. An observed-day mean is
 		// informational until the full window and source evidence are available.
 		const avgDailyDemand = row.observed_days >= 14 ? row.average_daily_demand : null
-		const demandReady = row.observed_days === 30 && row.invalid_demand_rows === 0 && row.sales_freshness === "current"
-		const daysOfSupply = demandReady && avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
+		const demandReady = row.observed_days === 30 && row.invalid_demand_rows === 0 && !row.numeric_range_exceeded && row.sales_freshness === "current"
+		const projectionReady = demandReady && row.freshness_state === "current"
+		const daysOfSupply = projectionReady && avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
+		const projectedAt = daysOfSupply === null ? null : Date.now() + daysOfSupply * 86400000
+		const projectionOutOfRange = projectedAt !== null && (!Number.isFinite(projectedAt) || projectedAt > Date.parse("9999-12-31T23:59:59.999Z"))
+		if (projectionOutOfRange) blockers.push("stockout_date_range_exceeded")
 		return {
 			sku: row.sku, status: blockers.length ? "blocked" : "ready", blockers,
 			assumptions: { demandWindowDays: 30, observedSalesDays: row.observed_days,
+				velocityWindows: row.velocity_windows,
 				missingSalesDays: 30 - row.observed_days, demandAverageMethod: "observed_days",
 				invalidDemandRows: row.invalid_demand_rows, salesFreshness: row.sales_freshness,
 				latestSalesDate: row.latest_sales_date,
 				salesLoadedAt: row.loaded_at || null, inventoryObservedAt: row.observed_at,
 				seasonality: "not_applied", leadTime: "not_configured" },
 			availableNow: row.available_qty, averageDailyDemand: avgDailyDemand,
-			daysOfSupply, projectedStockoutDay: daysOfSupply === null ? null :
-				new Date(Date.now() + daysOfSupply * 86400000).toISOString().slice(0, 10),
+			daysOfSupply, projectedStockoutDay: projectedAt === null || projectionOutOfRange ? null :
+				new Date(projectedAt).toISOString().slice(0, 10),
 			confidence: blockers.length ? 0 : Math.min(1, row.observed_days / 30),
 		}
 	})
