@@ -90,12 +90,47 @@ def _finite_nonnegative(value: Any) -> float | None:
     return number if math.isfinite(number) and number >= 0 else None
 
 
-def _empty(source: InventoryForecastInput, blockers: list[str]) -> InventoryForecast:
+def _demand_velocity_windows(
+    as_of: date, daily_units: Mapping[date, float],
+) -> dict[str, Any] | None:
+    """Describe observed completed days; absent dates remain missing, never zero."""
+    windows: dict[str, Any] = {}
+    end_ordinal = as_of.toordinal() - 1
+    for window_days in (7, 14, 30):
+        start_ordinal = as_of.toordinal() - window_days
+        units = [value for day, value in daily_units.items()
+                 if start_ordinal <= day.toordinal() <= end_ordinal]
+        observed_days = len(units)
+        total = sum(units) if units else None
+        if total is not None and not math.isfinite(total):
+            return None
+        windows[f"{window_days}d"] = {
+            "window_days": window_days,
+            "start_day": (date.fromordinal(start_ordinal).isoformat()
+                          if start_ordinal >= date.min.toordinal() else None),
+            "end_day": (date.fromordinal(end_ordinal).isoformat()
+                        if end_ordinal >= date.min.toordinal() else None),
+            "observed_days": observed_days,
+            "missing_days": window_days - observed_days,
+            "coverage": round(observed_days / window_days, 4),
+            "status": ("complete" if observed_days == window_days
+                       else "partial" if observed_days else "no_data"),
+            "units_observed": total,
+            "average_daily_units_observed": round(total / observed_days, 4)
+            if total is not None else None,
+        }
+    return windows
+
+
+def _empty(
+    source: InventoryForecastInput, blockers: list[str],
+    velocity_windows: Mapping[str, Any] | None = None,
+) -> InventoryForecast:
     return InventoryForecast(
         sku=source.sku, status="blocked", confidence=0.0, blockers=tuple(blockers),
         assumptions={"source": source.source, "observed_at": (
             source.observed_at.isoformat() if type(source.observed_at) is date else None
-        )},
+        ), **({"velocity_windows": velocity_windows} if velocity_windows is not None else {})},
         available_now=None, average_daily_demand=None, days_of_supply_now=None,
         projected_stockout_day=None, stockout_before_receipt=None,
         projected_available_at_lead_time=None, projected_excess_at_lead_time=None,
@@ -112,7 +147,10 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
     status is explicitly ``expected`` enter future positions. Invalid inputs
     return a blocked result without replenishment quantities; daily projection
     horizons are limited to 3,660 days and Python's supported calendar range.
+    The additive 7/14/30-day velocity evidence uses completed dates and observed
+    values only; it does not change the forecast's all-history mean.
     """
+    velocity_windows = None
     if not inputs.sku or not inputs.source:
         return _empty(inputs, ["missing_identity_or_source"])
     blockers: list[str] = []
@@ -126,7 +164,7 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
     if type(inputs.as_of) is not date or type(inputs.observed_at) is not date:
         blockers.append("invalid_input_dates")
     if blockers:
-        return _empty(inputs, blockers)
+        return _empty(inputs, blockers, velocity_windows)
     if any(type(item.day) is not date for item in inputs.demand):
         return _empty(inputs, ["invalid_demand_dates"])
     available = _finite_nonnegative(inputs.position.available_now)
@@ -148,6 +186,11 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
     if any(value is None for value in valid_demand):
         blockers.append("invalid_demand_history")
     values = [value for value in valid_demand if value is not None]
+    if not {"duplicate_demand_dates", "demand_timestamp_in_future",
+            "invalid_demand_history"}.intersection(blockers):
+        velocity_windows = _demand_velocity_windows(
+            inputs.as_of, {item.day: value for item, value in zip(history, values, strict=True)},
+        )
     if len(values) < inputs.minimum_history_days:
         blockers.append("sparse_demand_history")
     lead = _finite_nonnegative(inputs.lead_time_days)
@@ -173,14 +216,14 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
     # Invalid inputs must not yield an actionable replenishment calculation.
     if any(blocker not in {"inventory_source_stale", "inventory_source_partial"}
            for blocker in blockers):
-        return _empty(inputs, blockers)
+        return _empty(inputs, blockers, velocity_windows)
     lead_days = math.ceil(lead)
     if inputs.as_of.toordinal() + max(lead_days, 1) > date.max.toordinal():
-        return _empty(inputs, [*blockers, "forecast_date_range_exceeded"])
+        return _empty(inputs, [*blockers, "forecast_date_range_exceeded"], velocity_windows)
 
     average = sum(values) / len(values) if values else 0.0
     if not math.isfinite(average):
-        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"])
+        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"], velocity_windows)
     base_index = indices.get(inputs.as_of.timetuple().tm_yday, 0.0)
     receipts: dict[date, float] = {}
     invalid_receipt = False
@@ -195,7 +238,7 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
         receipts[receipt.arrival_day] = receipts.get(receipt.arrival_day, 0.0) + quantity
     if invalid_receipt:
         blockers.append("invalid_expected_receipt")
-        return _empty(inputs, blockers)
+        return _empty(inputs, blockers, velocity_windows)
 
     horizon = max(lead_days, 1)
     projected = available
@@ -210,7 +253,7 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
         projected += receipts.get(day, 0.0)
         projected -= day_demand
         if not math.isfinite(day_demand) or not math.isfinite(projected):
-            return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"])
+            return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"], velocity_windows)
         if projected <= 0 and day_demand > 0 and stockout_day is None:
             stockout_day = day
             stockout_before_receipt = not any(
@@ -222,7 +265,7 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
 
     days_supply = available / average if average > 0 else None
     if days_supply is not None and not math.isfinite(days_supply):
-        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"])
+        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"], velocity_windows)
     lead_demand = sum(point[1] for point in points[:lead_days])
     lead_day = inputs.as_of.fromordinal(inputs.as_of.toordinal() + lead_days)
     receipts_by_lead = sum(
@@ -230,16 +273,16 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
         if inputs.as_of < arrival <= lead_day
     )
     if not math.isfinite(receipts_by_lead) or not math.isfinite(lead_demand):
-        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"])
+        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"], velocity_windows)
     available_at_lead = max(0.0, available + receipts_by_lead - lead_demand)
     # Replenish projected lead-time stock up to one lead-time of safety stock.
     safety_stock = average * lead
     if not math.isfinite(available_at_lead) or not math.isfinite(safety_stock):
-        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"])
+        return _empty(inputs, [*blockers, "nonfinite_forecast_calculation"], velocity_windows)
     reorder_quantity = max(0.0, safety_stock - available_at_lead)
     due_ordinal = inputs.as_of.toordinal() + max(0, math.floor((days_supply or 0.0) - lead))
     if due_ordinal > date.max.toordinal():
-        return _empty(inputs, [*blockers, "forecast_date_range_exceeded"])
+        return _empty(inputs, [*blockers, "forecast_date_range_exceeded"], velocity_windows)
     due_day = date.fromordinal(due_ordinal)
     confidence = min(1.0, len(values) / max(inputs.minimum_history_days * 2, 1))
     confidence *= min(1.0, inputs.lead_time_samples / 10)
@@ -256,7 +299,9 @@ def forecast_inventory(inputs: InventoryForecastInput) -> InventoryForecast:
         inputs.sku, "reduced_confidence" if blockers else "ready", round(confidence, 4),
         tuple(blockers),
         {"source": inputs.source, "observed_at": inputs.observed_at.isoformat(),
-         "history_days": len(values), "lead_time_days": lead, "lead_time_samples": inputs.lead_time_samples,
+         "history_days": len(values), "velocity_windows": velocity_windows,
+         "forecast_average_method": "all_supplied_daily_observations",
+         "lead_time_days": lead, "lead_time_samples": inputs.lead_time_samples,
          "lead_time_method": "p90_observed" if lead_distribution else "provided_summary",
          "seasonality_method": "daily_index_ratio", "receipts_affect_future_only": True,
          "reserved": inputs.position.reserved, "inbound": inputs.position.inbound,
