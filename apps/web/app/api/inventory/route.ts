@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db"
 import { inventorySnapshotRead } from "@/lib/inventory"
-import { currentContext } from "@/lib/session"
+import { AuthenticationRequired, currentContext, TenantSelectionRequired } from "@/lib/session"
+import { assertManualInventoryRole, InventoryIntakeError, readInventoryIntakeBody, recordManualInventory } from "@/lib/inventory-intake"
 
 export const dynamic = "force-dynamic"
 
@@ -25,4 +26,20 @@ export async function GET(request: Request) {
 		},
 	))
 	return Response.json(inventory)
+}
+
+
+export async function POST(request: Request) {
+	try {
+		const actor = await currentContext()
+		assertManualInventoryRole(actor.role)
+		const body = await readInventoryIntakeBody(request)
+		const snapshot = await withTenant(actor.tenantId, client => recordManualInventory(client, actor, body))
+		return Response.json({ snapshot }, { status: snapshot.inserted ? 201 : 200 })
+	} catch (error) {
+		if (error instanceof InventoryIntakeError) return Response.json({ error: error.message }, { status: error.status })
+		if (error instanceof AuthenticationRequired) return Response.json({ error: error.message }, { status: 401 })
+		if (error instanceof TenantSelectionRequired) return Response.json({ error: error.message }, { status: 409 })
+		throw error
+	}
 }
