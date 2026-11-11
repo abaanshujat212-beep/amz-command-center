@@ -31,7 +31,7 @@ export async function inventorySnapshotRead(
 ) {
 	const offset = (options.page - 1) * options.pageSize
 	const filters = [tenantId, options.sku ?? null, options.locationCode ?? null, options.freshHours]
-	const rows = await query<InventorySnapshotView & { total: number }>(client, `
+	const rows = await query<InventorySnapshotView>(client, `
 		with latest as (
 			select distinct on (s.location_id,s.sku)
 				s.id::text snapshot_id,l.id::text location_id,l.location_code,l.display_name location_name,
@@ -49,11 +49,27 @@ export async function inventorySnapshotRead(
 				and ($3::text is null or l.location_code=$3)
 			order by s.location_id,s.sku,s.observed_at desc,s.id desc
 		)
-		select *,count(*) over()::int total from latest
+		select snapshot_id "snapshotId",location_id "locationId",location_code "locationCode",
+			location_name "locationName",location_type "locationType",marketplace_id "marketplaceId",
+			sku,source_type "sourceType",source_provider_id "sourceProviderId",source_reference "sourceReference",
+			observed_at "observedAt",freshness,available_qty "availableQty",on_hand_qty "onHandQty",
+			reserved_qty "reservedQty",inbound_qty "inboundQty",unsellable_qty "unsellableQty",
+			committed_qty "committedQty",in_transit_qty "inTransitQty",expected_available_at "expectedAvailableAt"
+		from latest
 		order by sku,location_code limit $5 offset $6`,
 	[...filters, options.pageSize, offset])
-	const countRows = await query<{ total: number }>(client, `
-		select count(*)::int total from inventory_position_snapshot s
+	const countRows = await query<{
+		total: number; current: number; stale: number; partial: number; unknown: number
+	}>(client, `
+		select count(*)::int total,
+			count(*) filter (where s.freshness_state = 'current' and s.observed_at <= now()
+				and s.observed_at >= now()-($4::int*interval '1 hour'))::int current,
+			count(*) filter (where s.freshness_state = 'stale' or (s.freshness_state = 'current'
+				and s.observed_at < now()-($4::int*interval '1 hour')))::int stale,
+			count(*) filter (where s.freshness_state = 'partial')::int partial,
+			count(*) filter (where s.freshness_state = 'unknown' or (s.freshness_state = 'current'
+				and s.observed_at > now()))::int unknown
+		from inventory_position_snapshot s
 		join inventory_location l on l.id=s.location_id and l.tenant_id=s.tenant_id and l.active
 		where s.tenant_id=$1 and ($2::text is null or s.sku=$2)
 			and ($3::text is null or l.location_code=$3)
@@ -61,24 +77,21 @@ export async function inventorySnapshotRead(
 				select 1 from inventory_position_snapshot newer
 				where newer.tenant_id=s.tenant_id and newer.location_id=s.location_id
 					and newer.sku=s.sku and (newer.observed_at,newer.id)>(s.observed_at,s.id)
-			)`, filters.slice(0, 3))
-	const total = countRows[0]?.total ?? 0
-	const snapshots = rows.map(({ total: _total, ...row }) => row)
-	const counts = snapshots.reduce((result, row) => {
-		result[row.freshness] += 1
-		return result
-	}, { current: 0, stale: 0, partial: 0, unknown: 0 })
+			)`, filters)
+	const { total, ...counts } = countRows[0] ?? { total: 0, current: 0, stale: 0, partial: 0, unknown: 0 }
 	return {
-		snapshots,
+		snapshots: rows,
 		pagination: { page: options.page, pageSize: options.pageSize, total },
-		freshness: { ...counts, thresholdHours: options.freshHours, ready: total > 0 && counts.stale === 0 && counts.partial === 0 && counts.unknown === 0 },
+		freshness: { ...counts, thresholdHours: options.freshHours, ready: total > 0 && counts.current === total },
 	}
 }
 
 export async function inventoryForecastRead(client: PoolClient, tenantId: string, freshHours: number) {
 	const rows = await query<{
 		sku: string; available_qty: number | null; observed_at: string; freshness_state: string;
-		units_ordered: number; observed_days: number; loaded_at: string;
+		average_daily_demand: number | null; observed_days: number; loaded_at: string;
+		invalid_demand_rows: number; sales_freshness: "current" | "stale" | "unknown";
+		latest_sales_date: string | null;
 	}>(client, `
 		with latest_position as (
 			select distinct on (s.location_id,s.sku) s.sku,s.available_qty,s.observed_at,
@@ -98,33 +111,55 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 			from latest_position group by sku
 		), sales as (
 			select coalesce(record->>'sku',record->>'sellerSku') sku,report_date,
-				coalesce((coalesce(record->>'units_ordered',record->>'unitsOrdered'))::numeric,0) units_ordered,
+				case when coalesce(record->>'units_ordered',record->>'unitsOrdered') ~ '^[0-9]{1,16}$'
+					then coalesce(record->>'units_ordered',record->>'unitsOrdered')::numeric
+					else null end units_ordered,
 				loaded_at
 			from raw.raw_sales_traffic_asin_daily
 			where tenant_id=$1 and report_date >= current_date-30 and report_date < current_date
 				and coalesce(record->>'sku',record->>'sellerSku') is not null
 		), demand_by_sku as (
-			select sku,sum(units_ordered) units_30d,count(distinct report_date)::int observed_days,
-				max(loaded_at) loaded_at from sales group by sku
+			select sku,
+				case when count(*) filter (where units_ordered is null) > 0 then null
+					else sum(units_ordered) / count(distinct report_date) end average_daily_demand,
+				count(distinct report_date)::int observed_days,
+				count(*) filter (where units_ordered is null)::int invalid_demand_rows,
+				max(report_date) latest_sales_date,
+				max(loaded_at) loaded_at, bool_or(loaded_at > now()) future_load
+			from sales group by sku
 		)
 		select p.sku,p.available_qty,p.observed_at::text observed_at,
 			case when p.source_unknown then 'unknown'
 				when p.source_stale then 'stale'
 				when p.source_partial then 'partial'
 				else 'current' end freshness_state,
-			coalesce(d.units_30d,0)::int units_ordered,coalesce(d.observed_days,0)::int observed_days,
+			d.average_daily_demand,coalesce(d.observed_days,0)::int observed_days,
+			coalesce(d.invalid_demand_rows,0)::int invalid_demand_rows,
+			d.latest_sales_date::text latest_sales_date,
+			case when d.loaded_at is null or d.future_load then 'unknown'
+				when d.loaded_at < now()-($2::int*interval '1 hour') then 'stale'
+				else 'current' end sales_freshness,
 			coalesce(d.loaded_at::text,'') loaded_at
 		from position_by_sku p left join demand_by_sku d using(sku) order by p.sku`, [tenantId, freshHours])
 	return rows.map(row => {
 		const blockers: string[] = []
 		if (row.available_qty === null) blockers.push("available_now_unknown")
 		if (row.observed_days < 14) blockers.push("sparse_demand_history")
+		if (row.observed_days < 30) blockers.push("incomplete_demand_history")
+		if (row.invalid_demand_rows > 0) blockers.push("invalid_demand_history")
+		if (row.sales_freshness !== "current") blockers.push(`sales_${row.sales_freshness}`)
 		if (row.freshness_state !== "current") blockers.push(`inventory_${row.freshness_state}`)
-		const avgDailyDemand = row.observed_days >= 14 ? row.units_ordered / 30 : null
-		const daysOfSupply = avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
+		// Gaps are unknown days, never inferred zero sales. An observed-day mean is
+		// informational until the full window and source evidence are available.
+		const avgDailyDemand = row.observed_days >= 14 ? row.average_daily_demand : null
+		const demandReady = row.observed_days === 30 && row.invalid_demand_rows === 0 && row.sales_freshness === "current"
+		const daysOfSupply = demandReady && avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
 		return {
 			sku: row.sku, status: blockers.length ? "blocked" : "ready", blockers,
 			assumptions: { demandWindowDays: 30, observedSalesDays: row.observed_days,
+				missingSalesDays: 30 - row.observed_days, demandAverageMethod: "observed_days",
+				invalidDemandRows: row.invalid_demand_rows, salesFreshness: row.sales_freshness,
+				latestSalesDate: row.latest_sales_date,
 				salesLoadedAt: row.loaded_at || null, inventoryObservedAt: row.observed_at,
 				seasonality: "not_applied", leadTime: "not_configured" },
 			availableNow: row.available_qty, averageDailyDemand: avgDailyDemand,
