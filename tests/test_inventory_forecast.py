@@ -145,3 +145,112 @@ def test_zero_lead_time_preserves_current_stock_without_future_demand_or_receipt
     assert result.projected_available_at_lead_time == 10
     assert result.projected_excess_at_lead_time == 10
     assert result.reorder_quantity == 0
+
+
+@pytest.mark.parametrize(("field", "value", "blocker"), [
+    ("stale_after_days", "3", "invalid_freshness_policy"),
+    ("stale_after_days", None, "invalid_freshness_policy"),
+    ("stale_after_days", True, "invalid_freshness_policy"),
+    ("minimum_history_days", "14", "invalid_history_policy"),
+    ("minimum_history_days", 0, "invalid_history_policy"),
+    ("minimum_history_days", True, "invalid_history_policy"),
+    ("lead_time_samples", "10", "lead_time_distribution_missing"),
+    ("lead_time_samples", 0, "lead_time_distribution_missing"),
+])
+def test_invalid_policy_blocks_before_arithmetic(field, value, blocker):
+    result = forecast_inventory(fixture(**{field: value}))
+    assert result.status == "blocked"
+    assert blocker in result.blockers
+    assert result.confidence == 0
+    assert result.reorder_quantity is None
+    assert result.forecast == ()
+
+
+def test_duplicate_demand_cannot_produce_reorder_even_with_enough_history():
+    source = fixture()
+    result = forecast_inventory(fixture(demand_data=(*source.demand, source.demand[0])))
+    assert result.status == "blocked"
+    assert "duplicate_demand_dates" in result.blockers
+    assert result.reorder_quantity is None
+
+
+def test_future_demand_is_explicitly_blocked_instead_of_silently_discarded():
+    source = fixture()
+    result = forecast_inventory(fixture(demand_data=(
+        *source.demand, DailyDemand(AS_OF + timedelta(days=1), 100),
+    )))
+    assert result.status == "blocked"
+    assert "demand_timestamp_in_future" in result.blockers
+    assert result.reorder_quantity is None
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("as_of", "2026-01-01"), ("observed_at", None),
+])
+def test_invalid_input_dates_return_blocked_result(field, value):
+    result = forecast_inventory(fixture(**{field: value}))
+    assert result.status == "blocked"
+    assert "invalid_input_dates" in result.blockers
+    assert result.reorder_quantity is None
+
+
+def test_invalid_demand_date_does_not_reach_sort_or_comparison():
+    source = fixture()
+    result = forecast_inventory(fixture(demand_data=(*source.demand, DailyDemand(None, 5))))
+    assert result.status == "blocked"
+    assert "invalid_demand_dates" in result.blockers
+
+
+def test_invalid_lead_distribution_does_not_fall_back_to_actionable_summary():
+    result = forecast_inventory(fixture(lead_time_observations=(2, float("nan"))))
+    assert result.status == "blocked"
+    assert "invalid_lead_time_distribution" in result.blockers
+    assert result.reorder_quantity is None
+
+
+def test_future_inventory_observation_cannot_produce_reorder():
+    result = forecast_inventory(fixture(observed_at=AS_OF + timedelta(days=1)))
+    assert result.status == "blocked"
+    assert "source_timestamp_in_future" in result.blockers
+    assert result.confidence == 0
+    assert result.reorder_quantity is None
+
+
+def test_lead_time_horizon_is_bounded_before_projection():
+    result = forecast_inventory(fixture(lead=3661))
+    assert result.status == "blocked"
+    assert "forecast_horizon_exceeded" in result.blockers
+    assert result.forecast == ()
+
+
+def test_projection_cannot_overflow_supported_calendar():
+    source = fixture(as_of=date.max - timedelta(days=1), observed_at=date.max - timedelta(days=1))
+    result = forecast_inventory(source)
+    assert result.status == "blocked"
+    assert "forecast_date_range_exceeded" in result.blockers
+
+
+def test_invalid_expected_receipt_date_is_blocked():
+    result = forecast_inventory(fixture(receipts=(ExpectedReceipt(None, 10),)))
+    assert result.status == "blocked"
+    assert "invalid_expected_receipt" in result.blockers
+
+
+def test_invalid_seasonality_cannot_produce_reorder_from_partial_profile():
+    result = forecast_inventory(fixture(seasonal_indices={1: 1, 2: float("inf")}))
+    assert result.status == "blocked"
+    assert "invalid_seasonality_profile" in result.blockers
+    assert result.reorder_quantity is None
+
+
+@pytest.mark.parametrize(("available", "demand", "blocker"), [
+    (100, 1e308, "nonfinite_forecast_calculation"),
+    (1e308, 1e-300, "nonfinite_forecast_calculation"),
+    (1e9, 5, "forecast_date_range_exceeded"),
+])
+def test_extreme_finite_quantities_fail_closed_instead_of_overflowing(available, demand, blocker):
+    result = forecast_inventory(fixture(available=available, demand=demand))
+    assert result.status == "blocked"
+    assert blocker in result.blockers
+    assert result.reorder_quantity is None
+    assert result.forecast == ()
