@@ -72,6 +72,7 @@ async function checkPageRoles() {
  const pageNative=pageModule.require.bind(pageModule)
  pageModule.require=name=>{
   if(name==='next/link') return {default:({children,href,...props})=>React.createElement('a',{href,...props},children)}
+  if(name==='@/components/inventory-csv-import') return {InventoryCsvImport:()=>null}
   if(name==='@/components/manual-inventory-form') return {ManualInventoryForm}
   if(name==='@/components/inventory-workspace') return {InventoryWorkspace:()=>React.createElement('div',null,'Inventory workspace')}
   if(name==='@/lib/inventory-workspace') return filtersModule.exports
