@@ -107,6 +107,12 @@ def _nested(row: dict[str, Any], *path: str) -> Any:
     return value
 
 
+def _metric(row: dict[str, Any], primary: str, alias: str) -> Any:
+    """Prefer the documented field, including zero; use aliases only for null/missing."""
+    value = row.get(primary)
+    return row.get(alias) if value is None else value
+
+
 def normalize_row(row: dict[str, Any], fallback_date: dt.date) -> tuple[dt.date, str, dict[str, Any]]:
     asin = row.get("childAsin") or row.get("child_asin") or row.get("asin")
     if not asin:
@@ -121,13 +127,13 @@ def normalize_row(row: dict[str, Any], fallback_date: dt.date) -> tuple[dt.date,
         "child_asin": str(asin),
         "parent_asin": row.get("parentAsin") or row.get("parent_asin"),
         "sku": row.get("sku") or row.get("sellerSku"),
-        "units_ordered": sales.get("unitsOrdered") or sales.get("units_ordered"),
-        "ordered_product_sales": parse_money(sales.get("orderedProductSales") or sales.get("ordered_product_sales")),
-        "total_order_items": sales.get("totalOrderItems") or sales.get("total_order_items"),
+        "units_ordered": _metric(sales, "unitsOrdered", "units_ordered"),
+        "ordered_product_sales": parse_money(_metric(sales, "orderedProductSales", "ordered_product_sales")),
+        "total_order_items": _metric(sales, "totalOrderItems", "total_order_items"),
         "sessions": traffic.get("sessions"),
-        "page_views": traffic.get("pageViews") or traffic.get("page_views"),
-        "buy_box_percentage": traffic.get("buyBoxPercentage") or traffic.get("buy_box_percentage"),
-        "unit_session_percentage": sales.get("unitSessionPercentage") or sales.get("unit_session_percentage"),
+        "page_views": _metric(traffic, "pageViews", "page_views"),
+        "buy_box_percentage": _metric(traffic, "buyBoxPercentage", "buy_box_percentage"),
+        "unit_session_percentage": _metric(sales, "unitSessionPercentage", "unit_session_percentage"),
     }
     return report_date, str(asin), record
 

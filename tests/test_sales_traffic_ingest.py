@@ -3,6 +3,8 @@ import gzip
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from services.ingest.pipelines.sales_traffic import (
     REPORT_OPTIONS,
     SpConnection,
@@ -80,3 +82,51 @@ def test_persist_rotated_refresh_token_skips_unchanged_token(monkeypatch):
     client = SimpleNamespace(credentials=SimpleNamespace(refresh_token="same-token"))
     persist_rotated_refresh_token(conn, connection, client)
     assert conn.calls == []
+
+
+METRIC_ALIASES = [
+    ("salesByAsin", "unitsOrdered", "units_ordered"),
+    ("salesByAsin", "orderedProductSales", "ordered_product_sales"),
+    ("salesByAsin", "totalOrderItems", "total_order_items"),
+    ("trafficByAsin", "pageViews", "page_views"),
+    ("trafficByAsin", "buyBoxPercentage", "buy_box_percentage"),
+    ("salesByAsin", "unitSessionPercentage", "unit_session_percentage"),
+]
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("fallback", [None, 17])
+@pytest.mark.parametrize(("section", "primary", "alias"), METRIC_ALIASES)
+def test_explicit_zero_is_preserved_over_null_or_conflicting_alias(
+    nested, fallback, section, primary, alias,
+):
+    metrics = {primary: 0, alias: fallback}
+    row = {"childAsin": "B001", **({section: metrics} if nested else metrics)}
+    _, _, record = normalize_row(row, dt.date(2026, 8, 22))
+    assert record[alias] == 0
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("include_null", [False, True])
+@pytest.mark.parametrize("fallback", [0, 17])
+def test_numeric_aliases_fill_only_missing_or_null_primary(nested, include_null, fallback):
+    row = {"childAsin": "B001"}
+    for section, primary, alias in METRIC_ALIASES:
+        metrics = row.setdefault(section, {}) if nested else row
+        metrics[alias] = fallback
+        if include_null:
+            metrics[primary] = None
+    _, _, record = normalize_row(row, dt.date(2026, 8, 22))
+    for _, _, alias in METRIC_ALIASES:
+        assert record[alias] == fallback
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_missing_metrics_remain_unknown(nested):
+    row = {"childAsin": "B001"}
+    if nested:
+        row.update({"salesByAsin": {}, "trafficByAsin": {}})
+    _, _, record = normalize_row(row, dt.date(2026, 8, 22))
+    for _, _, alias in METRIC_ALIASES:
+        assert record[alias] is None
+    assert record["sessions"] is None
