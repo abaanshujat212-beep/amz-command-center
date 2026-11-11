@@ -254,3 +254,86 @@ def test_extreme_finite_quantities_fail_closed_instead_of_overflowing(available,
     assert blocker in result.blockers
     assert result.reorder_quantity is None
     assert result.forecast == ()
+
+
+def test_velocity_windows_describe_completed_history_without_changing_forecast_average():
+    # 30 completed days: the latest week sells faster than the preceding weeks.
+    demand = tuple(
+        DailyDemand(AS_OF - timedelta(days=offset), 10 if offset <= 7 else 2)
+        for offset in range(30, 0, -1)
+    )
+    result = forecast_inventory(fixture(demand_data=demand))
+    windows = result.assumptions["velocity_windows"]
+    assert result.status == "ready"
+    assert result.average_daily_demand == round((7 * 10 + 23 * 2) / 30, 4)
+    assert windows["7d"] == {
+        "window_days": 7, "start_day": "2025-12-25", "end_day": "2025-12-31",
+        "observed_days": 7, "missing_days": 0, "coverage": 1.0, "status": "complete",
+        "units_observed": 70, "average_daily_units_observed": 10,
+    }
+    assert windows["14d"]["units_observed"] == 84
+    assert windows["14d"]["average_daily_units_observed"] == 6
+    assert windows["30d"]["units_observed"] == 116
+    assert result.assumptions["forecast_average_method"] == "all_supplied_daily_observations"
+
+
+def test_velocity_windows_do_not_fill_missing_days_with_zero():
+    demand = (
+        DailyDemand(AS_OF - timedelta(days=1), 6),
+        DailyDemand(AS_OF - timedelta(days=3), 0),
+        DailyDemand(AS_OF - timedelta(days=7), 3),
+    )
+    result = forecast_inventory(fixture(demand_data=demand))
+    assert result.status == "blocked"
+    assert "sparse_demand_history" in result.blockers
+    window = result.assumptions["velocity_windows"]["7d"]
+    assert window["observed_days"] == 3
+    assert window["missing_days"] == 4
+    assert window["coverage"] == round(3 / 7, 4)
+    assert window["units_observed"] == 9
+    assert window["average_daily_units_observed"] == 3
+    assert window["status"] == "partial"
+    assert result.reorder_quantity is None
+
+
+def test_current_day_and_older_history_do_not_enter_velocity_window():
+    result = forecast_inventory(fixture(demand_data=(
+        DailyDemand(AS_OF, 100),
+        DailyDemand(AS_OF - timedelta(days=7), 0),
+        DailyDemand(AS_OF - timedelta(days=8), 8),
+        DailyDemand(AS_OF - timedelta(days=31), 1000),
+    )))
+    windows = result.assumptions["velocity_windows"]
+    assert windows["7d"]["observed_days"] == 1
+    assert windows["7d"]["units_observed"] == 0
+    assert windows["7d"]["average_daily_units_observed"] == 0
+    assert windows["30d"]["observed_days"] == 2
+    assert windows["30d"]["units_observed"] == 8
+
+
+def test_velocity_window_with_no_observations_is_unknown_not_zero():
+    result = forecast_inventory(fixture(demand_data=()))
+    assert result.status == "blocked"
+    for window in result.assumptions["velocity_windows"].values():
+        assert window["observed_days"] == 0
+        assert window["missing_days"] == window["window_days"]
+        assert window["coverage"] == 0
+        assert window["status"] == "no_data"
+        assert window["units_observed"] is None
+        assert window["average_daily_units_observed"] is None
+
+
+def test_invalid_demand_does_not_expose_ambiguous_velocity_evidence():
+    source = fixture()
+    result = forecast_inventory(fixture(demand_data=(*source.demand, source.demand[0])))
+    assert result.status == "blocked"
+    assert "velocity_windows" not in result.assumptions
+
+
+def test_velocity_window_boundaries_do_not_overflow_minimum_calendar_date():
+    result = forecast_inventory(fixture(as_of=date.min, observed_at=date.min, demand_data=()))
+    assert result.status == "blocked"
+    for window in result.assumptions["velocity_windows"].values():
+        assert window["status"] == "no_data"
+        assert window["start_day"] is None
+        assert window["end_day"] is None
