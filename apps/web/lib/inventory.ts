@@ -89,7 +89,9 @@ export async function inventorySnapshotRead(
 export async function inventoryForecastRead(client: PoolClient, tenantId: string, freshHours: number) {
 	const rows = await query<{
 		sku: string; available_qty: number | null; observed_at: string; freshness_state: string;
-		units_ordered: number; observed_days: number; loaded_at: string;
+		average_daily_demand: number | null; observed_days: number; loaded_at: string;
+		invalid_demand_rows: number; sales_freshness: "current" | "stale" | "unknown";
+		latest_sales_date: string | null;
 	}>(client, `
 		with latest_position as (
 			select distinct on (s.location_id,s.sku) s.sku,s.available_qty,s.observed_at,
@@ -109,33 +111,55 @@ export async function inventoryForecastRead(client: PoolClient, tenantId: string
 			from latest_position group by sku
 		), sales as (
 			select coalesce(record->>'sku',record->>'sellerSku') sku,report_date,
-				coalesce((coalesce(record->>'units_ordered',record->>'unitsOrdered'))::numeric,0) units_ordered,
+				case when coalesce(record->>'units_ordered',record->>'unitsOrdered') ~ '^[0-9]{1,16}$'
+					then coalesce(record->>'units_ordered',record->>'unitsOrdered')::numeric
+					else null end units_ordered,
 				loaded_at
 			from raw.raw_sales_traffic_asin_daily
 			where tenant_id=$1 and report_date >= current_date-30 and report_date < current_date
 				and coalesce(record->>'sku',record->>'sellerSku') is not null
 		), demand_by_sku as (
-			select sku,sum(units_ordered) units_30d,count(distinct report_date)::int observed_days,
-				max(loaded_at) loaded_at from sales group by sku
+			select sku,
+				case when count(*) filter (where units_ordered is null) > 0 then null
+					else sum(units_ordered) / count(distinct report_date) end average_daily_demand,
+				count(distinct report_date)::int observed_days,
+				count(*) filter (where units_ordered is null)::int invalid_demand_rows,
+				max(report_date) latest_sales_date,
+				max(loaded_at) loaded_at, bool_or(loaded_at > now()) future_load
+			from sales group by sku
 		)
 		select p.sku,p.available_qty,p.observed_at::text observed_at,
 			case when p.source_unknown then 'unknown'
 				when p.source_stale then 'stale'
 				when p.source_partial then 'partial'
 				else 'current' end freshness_state,
-			coalesce(d.units_30d,0)::int units_ordered,coalesce(d.observed_days,0)::int observed_days,
+			d.average_daily_demand,coalesce(d.observed_days,0)::int observed_days,
+			coalesce(d.invalid_demand_rows,0)::int invalid_demand_rows,
+			d.latest_sales_date::text latest_sales_date,
+			case when d.loaded_at is null or d.future_load then 'unknown'
+				when d.loaded_at < now()-($2::int*interval '1 hour') then 'stale'
+				else 'current' end sales_freshness,
 			coalesce(d.loaded_at::text,'') loaded_at
 		from position_by_sku p left join demand_by_sku d using(sku) order by p.sku`, [tenantId, freshHours])
 	return rows.map(row => {
 		const blockers: string[] = []
 		if (row.available_qty === null) blockers.push("available_now_unknown")
 		if (row.observed_days < 14) blockers.push("sparse_demand_history")
+		if (row.observed_days < 30) blockers.push("incomplete_demand_history")
+		if (row.invalid_demand_rows > 0) blockers.push("invalid_demand_history")
+		if (row.sales_freshness !== "current") blockers.push(`sales_${row.sales_freshness}`)
 		if (row.freshness_state !== "current") blockers.push(`inventory_${row.freshness_state}`)
-		const avgDailyDemand = row.observed_days >= 14 ? row.units_ordered / 30 : null
-		const daysOfSupply = avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
+		// Gaps are unknown days, never inferred zero sales. An observed-day mean is
+		// informational until the full window and source evidence are available.
+		const avgDailyDemand = row.observed_days >= 14 ? row.average_daily_demand : null
+		const demandReady = row.observed_days === 30 && row.invalid_demand_rows === 0 && row.sales_freshness === "current"
+		const daysOfSupply = demandReady && avgDailyDemand && row.available_qty !== null ? row.available_qty / avgDailyDemand : null
 		return {
 			sku: row.sku, status: blockers.length ? "blocked" : "ready", blockers,
 			assumptions: { demandWindowDays: 30, observedSalesDays: row.observed_days,
+				missingSalesDays: 30 - row.observed_days, demandAverageMethod: "observed_days",
+				invalidDemandRows: row.invalid_demand_rows, salesFreshness: row.sales_freshness,
+				latestSalesDate: row.latest_sales_date,
 				salesLoadedAt: row.loaded_at || null, inventoryObservedAt: row.observed_at,
 				seasonality: "not_applied", leadTime: "not_configured" },
 			availableNow: row.available_qty, averageDailyDemand: avgDailyDemand,
