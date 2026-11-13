@@ -82,7 +82,10 @@ def propose_budget_reallocation(
     """
     if not portfolio_id or not as_of:
         raise ValueError("portfolio_id and as_of are required")
-    target = Decimal(str(target_efficiency))
+    try:
+        target = Decimal(str(target_efficiency))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError("target_efficiency must be finite and nonnegative") from exc
     if not target.is_finite() or target < 0:
         raise ValueError("target_efficiency must be finite and nonnegative")
     transfer_limit = _money(max_transfer, "max_transfer")
@@ -92,10 +95,17 @@ def propose_budget_reallocation(
         raise ValueError("campaign IDs must be nonempty and unique")
     validated: list[BudgetCandidate] = []
     for row in rows:
+        if not isinstance(row.campaign_id, str) or not row.campaign_id.strip():
+            raise ValueError("campaign IDs must be nonempty and unique")
         current = _money(row.daily_budget, "daily_budget")
         minimum = _money(row.minimum_budget, "minimum_budget")
         maximum = _money(row.maximum_budget, "maximum_budget")
-        efficiency = Decimal(str(row.efficiency))
+        if minimum > maximum:
+            raise ValueError("minimum campaign budget must not exceed maximum budget")
+        try:
+            efficiency = Decimal(str(row.efficiency))
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ValueError("efficiency must be finite and nonnegative") from exc
         if not efficiency.is_finite() or efficiency < 0:
             raise ValueError("efficiency must be finite and nonnegative")
         if minimum > current or current > maximum:
@@ -153,6 +163,7 @@ def propose_budget_reallocation(
         raise AssertionError("portfolio budget allocation did not conserve total")
     fingerprint = {
         "portfolio_id": portfolio_id, "as_of": as_of,
+        "target_efficiency": str(target), "max_transfer": str(transfer_limit),
         "allocations": [(item.campaign_id, str(item.before), str(item.after)) for item in allocations],
     }
     key = hashlib.sha256(json.dumps(fingerprint, sort_keys=True).encode()).hexdigest()
