@@ -38,12 +38,12 @@ def intake_db():
 
 def snapshot_values(tenant, location):
     return [tenant, "count-1", location, "SKU", "2026-01-01T12:00:00Z", "current",
-            None, "0", None, None, None, None, None, None, None, json.dumps({"enteredBy": "actor-1"})]
+            None, "0", None, None, None, None, None, None, None, json.dumps({"enteredBy": "actor-1"}), "manual"]
 
 
 def reference_values(tenant):
     return [tenant, "count-1", "warehouse", "Warehouse", "SKU", "2026-01-01T12:00:00Z", "current",
-            None, "0", None, None, None, None, None, None, None]
+            None, "0", None, None, None, None, None, None, None, "manual"]
 
 
 def test_manual_intake_is_append_only_and_exact_sql_retry_does_not_overwrite(intake_db):
