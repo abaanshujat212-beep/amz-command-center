@@ -1,4 +1,5 @@
 import Link from "next/link"
+import { InventoryCsvImport } from "@/components/inventory-csv-import"
 import { ManualInventoryForm } from "@/components/manual-inventory-form"
 import { InventoryWorkspace } from "@/components/inventory-workspace"
 import { withTenant } from "@/lib/db"
@@ -20,5 +21,5 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
 		return { inventory, forecasts: forecasts.filter(row => visibleSkus.has(row.sku)) }
 	})
 	const locations = [...new Map(data.inventory.snapshots.map(row => [row.locationCode, { locationCode: row.locationCode, locationName: row.locationName }])).values()]
-	return <div className="space-y-6"><InventoryWorkspace {...data} filters={filters} />{mayManageTenant(actor.role) ? <ManualInventoryForm key={actor.tenantId} locations={locations} initialObservedAt={new Date().toISOString()} /> : <p className="text-sm text-slate-500">Your role has read-only inventory access. Ask an owner or admin to record a stock count.</p>}</div>
+	return <div className="space-y-6"><InventoryWorkspace {...data} filters={filters} />{mayManageTenant(actor.role) ? <><ManualInventoryForm key={actor.tenantId} locations={locations} initialObservedAt={new Date().toISOString()} /><InventoryCsvImport key={`csv-${actor.tenantId}`} /></> : <p className="text-sm text-slate-500">Your role has read-only inventory access. Ask an owner or admin to record a stock count.</p>}</div>
 }
