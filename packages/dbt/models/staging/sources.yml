@@ -32,5 +32,7 @@ sources:
       - name: sku_cost_ledger
       - name: tenant
       - name: tenant_settings
+      - name: pipeline_run
+      - name: portfolio_budget_limit
       - name: cogs_calculation_run
       - name: cogs_allocation
