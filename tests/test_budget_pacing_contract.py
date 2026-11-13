@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 QUERY = (ROOT / "apps/web/lib/queries-budget-pacing.ts").read_text()
 PAGE = (ROOT / "apps/web/app/budget-pacing/page.tsx").read_text()
