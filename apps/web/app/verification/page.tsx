@@ -3,7 +3,8 @@ import { withTenant } from "@/lib/db"
 import { money, percent, stamp } from "@/lib/format"
 import { verificationScorecards } from "@/lib/queries-verification"
 import type { VerificationScorecard } from "@/lib/queries-verification"
-import { currentTenantId } from "@/lib/session"
+import { currentContext } from "@/lib/session"
+import { ActionExperiments } from "@/components/action-experiments"
 
 export const dynamic = "force-dynamic"
 
@@ -33,7 +34,8 @@ function ConfounderEvidence({ snapshot }: { snapshot: VerificationScorecard["sna
 }
 
 export default async function VerificationPage() {
-	const rows = await withTenant(await currentTenantId(), c => verificationScorecards(c))
+	const actor = await currentContext()
+	const rows = await withTenant(actor.tenantId, c => verificationScorecards(c))
 	return <div className="space-y-4">
 		<header>
 			<h1 className="text-lg font-semibold">Verification scorecards</h1>
@@ -69,5 +71,6 @@ export default async function VerificationPage() {
 			})}
 		</div>}
 		<p className="text-xs text-slate-500">Verification is read-only. It never changes Amazon state; it only records whether an approved change improved, worsened, stayed neutral or remained inconclusive.</p>
+		<ActionExperiments canManage={actor.role === "owner" || actor.role === "admin"} />
 	</div>
 }
