@@ -1,39 +1,32 @@
-# `main` branch protection plan
+# `main` branch protection status
 
-This document records the intended GitHub ruleset for `main`. It is a
-configuration plan; it does not change repository settings. The issue that
-requested this plan requires separate explicit authorization before any
-repository-administration change.
+This document records the live GitHub ruleset read for `main` on 2026-11-13.
+It is documentation only and does not change repository settings.
 
-## Proposed ruleset
+## Verified ruleset
 
 | Setting | Value |
 | --- | --- |
-| Name | `protect-main` |
+| Name | `Protect main` (ruleset 26955622) |
 | Target | Branch `main` |
 | Enforcement | Active |
 | Pull requests | Required for all changes |
 | Required checks | `Python static checks and unit tests`; `Migration and Postgres-backed tests`; `dbt build`; `Web typecheck and build` |
-| Check freshness | Require the branch to be up to date with `main` before merge |
-| Force pushes | Block |
-| Branch deletion | Block |
-| Administrator bypass | No bypass actors; administrators follow the same PR and CI requirements |
+| Check freshness | Strict; branch must be up to date with `main` |
+| Force pushes | Blocked by non-fast-forward rule |
+| Branch deletion | Blocked |
+| Administrator bypass | No bypass actors; current user cannot bypass |
+| Required approvals | 0 |
+| Allowed merge methods | Merge, squash, and rebase |
 
-The repository currently merges work by squash, so linear history is consistent
-with its workflow. This plan does not require a reviewer approval count: the
-existing delivery process depends on green CI and could otherwise be blocked
-when no second reviewer is available.
+The live ruleset also does not require code-owner review, last-push approval,
+or review-thread resolution. `dismiss_stale_reviews_on_push` is false. The
+repository's earlier plan described squash as its merge convention, but the
+live ruleset allows all three merge methods.
 
-## Apply and verify after authorization
+## Verification limits
 
-1. Create the ruleset in repository Settings → Rules → Rulesets.
-2. Select the `main` branch and enter the settings above.
-3. Select the four exact status-check contexts emitted by the CI workflow.
-4. Save with no bypass actors.
-5. Re-read the ruleset and branch protection state, then verify a test branch
-   cannot push directly or force-push to `main`.
-
-The current branch-protection read through the available GitHub credential
-returned HTTP 403, so this plan does not claim to verify the repository's
-existing administration settings. Confirm the live ruleset after an authorized
-administrator applies it.
+The ruleset API confirms the active configuration and its rules. This read-only
+check did not attempt a direct push or force push to `main`; enforcement of
+those operations is inferred from the configured pull-request, deletion, and
+non-fast-forward rules.
