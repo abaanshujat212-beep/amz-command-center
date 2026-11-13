@@ -13,7 +13,7 @@ def test_inventory_forecast_route_is_session_and_tenant_scoped():
 
 def test_forecast_blocks_sparse_stale_and_unknown_inputs_with_assumptions():
     assert "where tenant_id=$1" in LIB
-    assert 'blockers.push("sparse_demand_history")' in LIB
+    assert 'minimumHistoryDays: 14' in LIB
     assert "inventory_${row.freshness_state}" in LIB
     assert "available_now_unknown" in LIB
     assert 'seasonality: "not_applied"' in LIB
