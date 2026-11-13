@@ -28,7 +28,7 @@ def csv_db():
         db.execute("insert into tenant(id,name,slug) values(%s,'CSV SQL test',%s)", (tenant, str(tenant)))
         db.execute("set local role axaty_app")
         db.execute("select set_config('app.tenant_id',%s,true)", (str(tenant),))
-        location, = run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Warehouse"])
+        location, = run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Warehouse", None])
         yield db, tenant, location["id"]
         db.rollback()
 
@@ -41,7 +41,7 @@ def values(tenant, location, reference="csv-1"):
 
 def reference_values(tenant, reference="csv-1", source="csv_import"):
     return [tenant, reference, "warehouse", "Warehouse", "SKU", "2026-01-01T12:00:00Z", "current",
-            None, "0", None, None, None, None, None, None, None, source]
+            None, "0", None, None, None, None, None, None, None, source, None]
 
 
 def test_csv_source_and_actor_provenance_keep_unknown_and_zero(csv_db):
@@ -70,7 +70,7 @@ def test_batch_transaction_rolls_back_new_location_and_earlier_row_after_conflic
     run(db, "INSERT_SNAPSHOT_SQL", values(tenant, location, "existing"))
     with pytest.raises(ValueError, match="conflicting row"):
         with db.transaction():
-            created, = run(db, "CREATE_LOCATION_SQL", [tenant, "batch-created", "Batch created"])
+            created, = run(db, "CREATE_LOCATION_SQL", [tenant, "batch-created", "Batch created", None])
             run(db, "INSERT_SNAPSHOT_SQL", values(tenant, created["id"], "batch-row"))
             conflict = reference_values(tenant, "existing")
             conflict[8] = "7"

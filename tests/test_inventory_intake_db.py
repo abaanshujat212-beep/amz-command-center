@@ -31,7 +31,7 @@ def intake_db():
         db.execute("insert into tenant(id,name,slug) values(%s,'Intake SQL test',%s)", (tenant, str(tenant)))
         db.execute("set local role axaty_app")
         db.execute("select set_config('app.tenant_id',%s,true)", (str(tenant),))
-        location, = run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Warehouse"])
+        location, = run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Warehouse", None])
         yield db, tenant, location["id"]
         db.rollback()
 
@@ -43,7 +43,7 @@ def snapshot_values(tenant, location):
 
 def reference_values(tenant):
     return [tenant, "count-1", "warehouse", "Warehouse", "SKU", "2026-01-01T12:00:00Z", "current",
-            None, "0", None, None, None, None, None, None, None, "manual"]
+            None, "0", None, None, None, None, None, None, None, "manual", None]
 
 
 def test_manual_intake_is_append_only_and_exact_sql_retry_does_not_overwrite(intake_db):
@@ -90,7 +90,7 @@ def test_manual_reference_comparison_detects_conflicting_values_and_inactive_loc
 def test_create_location_conflict_never_renames_or_reactivates(intake_db):
     db, tenant, location = intake_db
     db.execute("update inventory_location set active=false where id=%s", (location,))
-    assert run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Replacement name"]) == []
+    assert run(db, "CREATE_LOCATION_SQL", [tenant, "warehouse", "Replacement name", "supplier"]) == []
     row, = run(db, "LOCATION_SQL", [tenant, "warehouse"])
     assert row["active"] is False
     assert row["display_name"] == "Warehouse"
@@ -122,3 +122,32 @@ def test_inventory_history_privileges_are_explicitly_limited(intake_db, table, p
     db, _, _ = intake_db
     row = db.execute("select has_table_privilege(current_user,%s,%s) allowed", (table, privilege)).fetchone()
     assert row["allowed"] is expected
+
+
+@pytest.mark.parametrize("location_type", ["own_warehouse", "third_party_logistics", "prep_center", "supplier", "in_transit", "other"])
+def test_local_location_type_is_created_without_overwriting_existing_metadata(intake_db, location_type):
+    db, tenant, _ = intake_db
+    location, = run(db, "CREATE_LOCATION_SQL", [tenant, "new-local", "New local location", location_type])
+    row, = run(db, "LOCATION_SQL", [tenant, "new-local"])
+    assert row["location_type"] == location_type
+    assert row["active"] is True
+    assert run(db, "CREATE_LOCATION_SQL", [tenant, "new-local", "Replacement", "other"]) == []
+    row, = run(db, "LOCATION_SQL", [tenant, "new-local"])
+    assert row["id"] == location["id"]
+    assert row["location_type"] == location_type
+    assert row["display_name"] == "New local location"
+
+
+def test_reference_comparison_respects_explicit_type_and_omitted_type_compatibility(intake_db):
+    db, tenant, location = intake_db
+    run(db, "INSERT_SNAPSHOT_SQL", snapshot_values(tenant, location))
+    values = reference_values(tenant)
+    values[-1] = "own_warehouse"
+    row, = run(db, "EXISTING_SNAPSHOT_SQL", values)
+    assert row["matches"] is True
+    values[-1] = "prep_center"
+    row, = run(db, "EXISTING_SNAPSHOT_SQL", values)
+    assert row["matches"] is False
+    values[-1] = None
+    row, = run(db, "EXISTING_SNAPSHOT_SQL", values)
+    assert row["matches"] is True

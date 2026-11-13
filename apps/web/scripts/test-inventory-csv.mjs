@@ -13,7 +13,8 @@ function load(path, imports) {
 	})
 	return module.exports
 }
-const intake = load("../lib/inventory-intake.ts", { "@/lib/db": { query: async (client, sql, params) => (await client.query(sql, params)).rows } })
+const locationTypes = load("../lib/inventory-location-types.ts", {})
+const intake = load("../lib/inventory-intake.ts", { "@/lib/inventory-location-types": locationTypes, "@/lib/db": { query: async (client, sql, params) => (await client.query(sql, params)).rows } })
 const csvApi = load("../lib/inventory-csv.ts", { "@/lib/inventory-intake": intake })
 const { parseInventoryCsvRequest, previewInventoryCsv, commitInventoryCsv } = csvApi
 const header = "locationCode,locationName,sku,sourceReference,observedAt,availableQty,onHandQty"
@@ -185,4 +186,8 @@ test("Postgres: opposite-order imports and a manual count serialize without ref/
 		await admin.query("delete from tenant where id=$1", [actor.tenantId])
 		await Promise.all([admin.end(), importing.end(), retrying.end(), manual.end()])
 	}
+})
+
+test("CSV locationType header remains unsupported after manual taxonomy expansion", () => {
+ assert.throws(() => previewInventoryCsv(document([base()], header + ",locationType")), /unknown header/)
 })
