@@ -100,9 +100,9 @@ def test_complete_clean_windows_report_no_recorded_changes_and_incomplete_window
             conn.execute(
                 """insert into action_verification_snapshot(
                    tenant_id,action_id,horizon_days,status,outcome,metric_keys,baseline_metrics,observed_metrics,
-                   window_before_start,window_before_end,window_after_start,window_after_end,reason_code)
-                   values(%s,%s,1,%s,%s,'[]','{}','{}',%s,%s,%s,%s,%s)""",
-                (tenant_id, action_id, status, outcome, today-dt.timedelta(days=2), today-dt.timedelta(days=1), today-dt.timedelta(days=1), today, None if status == "COMPLETE" else "WINDOW_NOT_MATURE"),
+                   window_before_start,window_before_end,window_after_start,window_after_end,reason_code,completed_at)
+                   values(%s,%s,1,%s,%s,'[]','{}','{}',%s,%s,%s,%s,%s,%s)""",
+                (tenant_id, action_id, status, outcome, today-dt.timedelta(days=2), today-dt.timedelta(days=1), today-dt.timedelta(days=1), today, None if status == "COMPLETE" else "WINDOW_NOT_MATURE", dt.datetime.now(dt.timezone.utc) if status == "COMPLETE" else None),
             )
         conn.commit()
         try:
