@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { isManualInventoryLocationType, MANUAL_INVENTORY_LOCATION_TYPES } from "@/lib/inventory-location-types"
 import { useRouter } from "next/navigation"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 
@@ -28,13 +29,15 @@ function utc(value: string, label: string, optional = false) {
 export function manualInventoryPayload(data: FormData, locations: Location[], now = Date.now()) {
 	const locationCode = text(data, "locationCode")
 	const locationName = text(data, "locationName")
+	const locationType = text(data, "locationType") || "own_warehouse"
+	if (!isManualInventoryLocationType(locationType)) throw new Error("Choose a supported local location type.")
 	const sku = text(data, "sku")
 	const sourceReference = text(data, "sourceReference")
 	if (!locationCode || locationCode.length > 100) throw new Error("Enter a location code of at most 100 characters.")
 	if (!sku || sku.length > 100) throw new Error("Enter a SKU of at most 100 characters.")
 	if (!sourceReference || sourceReference.length > 200) throw new Error("Enter a count reference of at most 200 characters.")
 	const knownLocation = locations.some(location => location.locationCode === locationCode)
-	if (locationName.length > 200) throw new Error("Warehouse name must be at most 200 characters.")
+	if (locationName.length > 200) throw new Error("Location name must be at most 200 characters.")
 	const observedAt = utc(text(data, "observedAt"), "Observation time")!
 	if (new Date(observedAt).getTime() > now) throw new Error("Observation time cannot be in the future.")
 	const freshness = text(data, "freshness") || "current"
@@ -48,7 +51,7 @@ export function manualInventoryPayload(data: FormData, locations: Location[], no
 		return [key, Number(raw)]
 	}))
 	return {
-		locationCode, ...(!knownLocation && locationName ? { locationName } : {}), sku, sourceReference, observedAt, freshness,
+		locationCode, ...(!knownLocation && locationName ? { locationName, locationType } : {}), sku, sourceReference, observedAt, freshness,
 		...values, expectedAvailableAt: utc(text(data, "expectedAvailableAt"), "Expected availability", true),
 	}
 }
@@ -61,6 +64,8 @@ export function ManualInventoryForm({ locations, initialObservedAt }: { location
 	const router = useRouter()
 	const form = useRef<HTMLFormElement>(null)
 	const submitting = useRef(false)
+	const [locationCode, setLocationCode] = useState("")
+	const knownLocation = locations.some(location => location.locationCode === locationCode.trim())
 	const [reference, setReference] = useState("")
 	const [observedAt, setObservedAt] = useState(initialObservedAt.slice(0, 16))
 	const [busy, setBusy] = useState(false)
@@ -93,6 +98,7 @@ export function ManualInventoryForm({ locations, initialObservedAt }: { location
 	}
 	function startAnother() {
 		form.current?.reset()
+		setLocationCode("")
 		setReference(countReference())
 		setObservedAt(utcMinute())
 		setError("")
@@ -102,16 +108,17 @@ export function ManualInventoryForm({ locations, initialObservedAt }: { location
 
 	return <details className="rounded-lg border bg-white p-4">
 		<summary className="cursor-pointer font-semibold">Record a stock count</summary>
-		<p className="mt-2 text-sm text-slate-600">Add a manual warehouse observation. Leave a quantity blank when it is unknown; enter 0 only when you have confirmed there is none.</p>
+		<p className="mt-2 text-sm text-slate-600">Add a manual stock observation. Leave a quantity blank when it is unknown; enter 0 only when you have confirmed there is none.</p>
 		<form ref={form} onSubmit={submit} className="mt-4 space-y-4" aria-busy={busy}>
 			<fieldset disabled={busy || Boolean(success)} className="space-y-4 disabled:opacity-70"><legend className="sr-only">Stock count details</legend>
 			<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-				<label className="grid gap-1 text-sm">Location code<input className={field} name="locationCode" required maxLength={100} list="inventory-location-codes" autoComplete="off" placeholder="e.g. MAIN-WAREHOUSE" /></label>
+				<label className="grid gap-1 text-sm">Location code<input className={field} name="locationCode" value={locationCode} onChange={event => setLocationCode(event.target.value)} required maxLength={100} list="inventory-location-codes" autoComplete="off" placeholder="e.g. MAIN-WAREHOUSE" /></label>
 				<datalist id="inventory-location-codes">{locations.map(location => <option key={location.locationCode} value={location.locationCode}>{location.locationName}</option>)}</datalist>
-				<label className="grid gap-1 text-sm">New warehouse name<input className={field} name="locationName" maxLength={200} placeholder="Required for a new location" aria-describedby="warehouse-name-help" /></label>
+				<label className="grid gap-1 text-sm">New location name<input className={field} name="locationName" maxLength={200} placeholder="Required for a new location" aria-describedby="location-name-help" /></label>
+				<label className="grid gap-1 text-sm">New location type<select className={field} name="locationType" defaultValue="own_warehouse" disabled={knownLocation} aria-describedby="location-name-help">{MANUAL_INVENTORY_LOCATION_TYPES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
 				<label className="grid gap-1 text-sm">SKU<input className={field} name="sku" required maxLength={100} autoComplete="off" /></label>
 			</div>
-			<p id="warehouse-name-help" className="text-xs text-slate-500">Existing location codes keep their current name and type. A new location is added as your own warehouse.</p>
+			<p id="location-name-help" className="text-xs text-slate-500">Name and type apply only when adding a new named location. Existing location codes keep their current name and type. Amazon FBA and AWD locations cannot be created here.</p>
 			<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 				<label className="grid gap-1 text-sm">Count reference<input className={field} name="sourceReference" required maxLength={200} value={reference} onChange={event => setReference(event.target.value)} aria-describedby="count-reference-help" /></label>
 				<label className="grid gap-1 text-sm">Observed at (UTC)<input className={field} name="observedAt" type="datetime-local" required value={observedAt} onChange={event => setObservedAt(event.target.value)} /></label>

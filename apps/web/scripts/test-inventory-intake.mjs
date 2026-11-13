@@ -5,12 +5,14 @@ import vm from "node:vm"
 import ts from "typescript"
 
 const source = readFileSync(new URL("../lib/inventory-intake.ts", import.meta.url), "utf8")
+const locationTypes = { exports: {} }
+vm.runInNewContext(ts.transpile(readFileSync(new URL("../lib/inventory-location-types.ts", import.meta.url), "utf8"), { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }), { exports: locationTypes.exports, module: locationTypes })
 const module = { exports: {} }
 vm.runInNewContext(ts.transpile(source, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS }), {
 	exports: module.exports, module, Date, Request, Response, TextDecoder, Uint8Array,
-	require: name => { assert.equal(name, "@/lib/db"); return { query: async (client, sql, params) => (await client.query(sql, params)).rows } },
+	require: name => { if (name === "@/lib/inventory-location-types") return locationTypes.exports; assert.equal(name, "@/lib/db"); return { query: async (client, sql, params) => (await client.query(sql, params)).rows } },
 })
-const { InventoryIntakeError, assertManualInventoryRole, parseManualInventoryInput, readInventoryIntakeBody, recordManualInventory } = module.exports
+const { InventoryIntakeError, assertManualInventoryRole, parseManualInventoryInput, readInventoryIntakeBody, recordManualInventory, recordCsvInventory } = module.exports
 const base = () => ({ locationCode: "warehouse", locationName: "Warehouse", sku: "SKU", sourceReference: "count-1", observedAt: "2026-01-01T12:00:00Z", availableQty: 0 })
 
 for (const role of ["viewer", "analyst", "user"]) test(`${role} cannot record inventory`, () => assert.throws(() => assertManualInventoryRole(role), error => error.status === 403))
@@ -158,3 +160,45 @@ test("Postgres: concurrent exact retries serialize to the same committed snapsho
 		await Promise.all([admin.end(), first.end(), retry.end()])
 	}
 })
+
+const localTypes = ["own_warehouse", "third_party_logistics", "prep_center", "supplier", "in_transit", "other"]
+test("omitted type stays unspecified until creation for backwards-compatible existing-location callers", () => {
+ assert.equal(parseManualInventoryInput(base()).locationType, null)
+})
+for (const locationType of localTypes) test(`manual parser accepts local type ${locationType}`, () => {
+ assert.equal(parseManualInventoryInput({ ...base(), locationType }).locationType, locationType)
+})
+for (const locationType of ["amazon_fba", "amazon_awd", "WAREHOUSE", "", null, 1, true]) test(`manual parser rejects unsupported type ${String(locationType)}`, () => {
+ assert.throws(() => parseManualInventoryInput({ ...base(), locationType }), error => error.status === 400)
+})
+test("manual JSON intake preserves explicit local type", async () => {
+ const request = new Request("https://example.test/api/inventory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...base(), locationType: "prep_center" }) })
+ assert.equal(parseManualInventoryInput(await readInventoryIntakeBody(request)).locationType, "prep_center")
+})
+test("CSV service rejects requested location types before database access", async () => {
+ await assert.rejects(() => recordCsvInventory({ query() { throw Error("must not query") } }, { tenantId: "t", userId: "u", role: "admin" }, { ...base(), locationType: "supplier" }), error => error.status === 400)
+})
+for (const locationType of localTypes) test(`Postgres: create ${locationType}, exact retry and omitted-type observation preserve it`, { skip: !databaseUrl }, () => dbFixture(async (client, actor) => {
+ const request = { ...base(), locationType }
+ const first = await recordManualInventory(client, actor, request)
+ assert.equal((await client.query("select location_type from inventory_location where id=$1", [first.locationId])).rows[0].location_type, locationType)
+ const retry = await recordManualInventory(client, actor, request)
+ assert.equal(retry.inserted, false)
+ assert.equal(retry.snapshotId, first.snapshotId)
+ const omittedRetry = await recordManualInventory(client, actor, base())
+ assert.equal(omittedRetry.snapshotId, first.snapshotId)
+ const mismatch = locationType === "other" ? "supplier" : "other"
+ await assert.rejects(() => recordManualInventory(client, actor, { ...request, locationType: mismatch }), error => error.status === 409)
+ await assert.rejects(() => recordManualInventory(client, actor, { ...request, sourceReference: "type-change", locationType: mismatch }), error => error.status === 409)
+ await recordManualInventory(client, actor, { ...base(), sourceReference: "next-count" })
+ assert.equal((await client.query("select location_type from inventory_location where id=$1", [first.locationId])).rows[0].location_type, locationType)
+ assert.equal((await client.query("select count(*)::int total from inventory_position_snapshot")).rows[0].total, 2)
+}))
+test("Postgres: CSV default creation remains own warehouse and existing local type is preserved", { skip: !databaseUrl }, () => dbFixture(async (client, actor) => {
+ const first = await recordManualInventory(client, actor, { ...base(), locationType: "prep_center" })
+ const observed = await recordCsvInventory(client, actor, { ...base(), sourceReference: "csv-existing" })
+ assert.equal(observed.locationId, first.locationId)
+ assert.equal((await client.query("select location_type from inventory_location where id=$1", [first.locationId])).rows[0].location_type, "prep_center")
+ const created = await recordCsvInventory(client, actor, { ...base(), locationCode: "csv-new", sourceReference: "csv-new" })
+ assert.equal((await client.query("select location_type from inventory_location where id=$1", [created.locationId])).rows[0].location_type, "own_warehouse")
+}))

@@ -7,12 +7,15 @@ const requireWeb = Module.createRequire(root + '/package.json')
 const ts = requireWeb('typescript')
 const React = requireWeb('react')
 const { renderToStaticMarkup } = requireWeb('react-dom/server')
+const typesFile = path.join(root, 'lib/inventory-location-types.ts')
+const typesModule = new Module(typesFile)
+typesModule._compile(ts.transpileModule(fs.readFileSync(typesFile,'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,typesFile)
 const filename = path.join(root, 'components/manual-inventory-form.tsx')
 const m = new Module(filename)
 m.filename = filename
 m.paths = Module._nodeModulePaths(root)
 const native = m.require.bind(m)
-m.require = name => name === 'next/navigation' ? {useRouter: () => ({refresh() {}})} : name === 'next/link' ? {default: ({children, href, ...props}) => React.createElement('a', {href, ...props}, children)} : native(name)
+m.require = name => name === '@/lib/inventory-location-types' ? typesModule.exports : name === 'next/navigation' ? {useRouter: () => ({refresh() {}})} : name === 'next/link' ? {default: ({children, href, ...props}) => React.createElement('a', {href, ...props}, children)} : native(name)
 m._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,filename)
 const {manualInventoryPayload,ManualInventoryForm} = m.exports
 const locations = [{locationCode:'WH-1',locationName:'Existing warehouse'}]
@@ -47,7 +50,7 @@ assert.throws(()=>manualInventoryPayload(fields({freshness:'fake'}),locations,no
 const html=renderToStaticMarkup(React.createElement(ManualInventoryForm,{locations,initialObservedAt:'2026-01-01T12:00:00Z'}))
 assert.match(html,/Record a stock count/)
 assert.match(html,/Observed at \(UTC\)/)
-assert.match(html,/New warehouse name/)
+assert.match(html,/New location name/)
 assert.match(html,/value="WH-1"/)
 assert.match(html,/value="2026-01-01T12:00"/)
 assert.match(html,/placeholder="Unknown"/)
@@ -97,3 +100,15 @@ async function checkPageRoles() {
  console.log('Inventory page role checks passed: owner/admin form, other roles read-only, unauthenticated reads blocked.')
 }
 checkPageRoles().catch(error=>{console.error(error);process.exitCode=1})
+
+assert.equal(manualInventoryPayload(fields({locationCode:'NEW',locationName:'New location'}),locations,now).locationType,'own_warehouse')
+for(const option of typesModule.exports.MANUAL_INVENTORY_LOCATION_TYPES) {
+ assert.equal(manualInventoryPayload(fields({locationCode:'NEW',locationName:'New location',locationType:option.value}),locations,now).locationType,option.value)
+ assert.match(html,new RegExp('value="'+option.value+'"'))
+}
+assert.equal(manualInventoryPayload(fields({locationType:'supplier'}),locations,now).locationType,undefined)
+assert.equal(manualInventoryPayload(fields({locationCode:'NOT-IN-PAGE',locationName:'',locationType:'supplier'}),locations,now).locationType,undefined)
+for(const locationType of ['amazon_fba','amazon_awd','invalid']) assert.throws(()=>manualInventoryPayload(fields({locationCode:'NEW',locationName:'New location',locationType}),locations,now),/location type/)
+assert.match(html,/New location type/)
+assert.doesNotMatch(html,/value="amazon_fba"|value="amazon_awd"/)
+console.log('Manual form local types: whitelist, default, creation-only payload, existing/filtered-location omission and Amazon exclusion passed.')
