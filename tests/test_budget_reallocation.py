@@ -45,9 +45,23 @@ def test_ties_are_deterministic_and_idempotency_key_is_stable():
                   max_transfer=Decimal("2"), as_of="2026-11-10")
     first = propose_budget_reallocation(**kwargs)
     second = propose_budget_reallocation(**kwargs)
+    permuted = propose_budget_reallocation(**{**kwargs, "candidates": list(reversed(candidates))})
     assert first.transfers[0].donor_campaign_id == "a-donor"
     assert first.transfers[0].receiver_campaign_id == "a-receiver"
     assert first.idempotency_key == second.idempotency_key
+    assert first.idempotency_key == permuted.idempotency_key
+    assert first.transfers == permuted.transfers
+
+
+def test_idempotency_key_includes_policy_inputs_even_when_allocation_is_unchanged():
+    candidate = campaign("at-target", "10", "5", "20", "1")
+    base = dict(portfolio_id="p", candidates=[candidate], target_efficiency=Decimal("1"),
+                max_transfer=Decimal("4"), as_of="2026-11-10")
+    first = propose_budget_reallocation(**base)
+    other_target = propose_budget_reallocation(**{**base, "target_efficiency": Decimal("2")})
+    smaller_cap = propose_budget_reallocation(**{**base, "max_transfer": Decimal("2")})
+    assert first.allocations == other_target.allocations == smaller_cap.allocations
+    assert len({first.idempotency_key, other_target.idempotency_key, smaller_cap.idempotency_key}) == 3
 
 
 def test_rejects_duplicate_ids_and_invalid_campaign_bounds():
@@ -61,4 +75,27 @@ def test_rejects_duplicate_ids_and_invalid_campaign_bounds():
         propose_budget_reallocation(
             portfolio_id="p", candidates=[campaign("x", "10", "11", "20", "1")],
             target_efficiency=Decimal("1"), max_transfer=Decimal("2"), as_of="today",
+        )
+
+
+def test_rejects_inverted_bounds_and_invalid_numeric_efficiency():
+    with pytest.raises(ValueError, match="must not exceed"):
+        propose_budget_reallocation(
+            portfolio_id="p", candidates=[campaign("x", "10", "12", "11", "1")],
+            target_efficiency=Decimal("1"), max_transfer=Decimal("2"), as_of="today",
+        )
+    for efficiency in ("NaN", "Infinity", "not-a-number"):
+        with pytest.raises(ValueError, match="efficiency must be finite"):
+            propose_budget_reallocation(
+                portfolio_id="p",
+                candidates=[BudgetCandidate("x", Decimal("10"), Decimal("5"), Decimal("20"), efficiency)],
+                target_efficiency=Decimal("1"), max_transfer=Decimal("2"), as_of="today",
+            )
+
+
+def test_rejects_invalid_target_efficiency_as_domain_error():
+    with pytest.raises(ValueError, match="target_efficiency"):
+        propose_budget_reallocation(
+            portfolio_id="p", candidates=[], target_efficiency="invalid",
+            max_transfer=Decimal("2"), as_of="today",
         )
