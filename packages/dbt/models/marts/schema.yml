@@ -120,6 +120,37 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [tenant_id, report_date, campaign_id, placement]
 
+  - name: mart_ppc_budget_health_daily
+    description: Settled campaign budget utilization, exhaustion risk, and economics signals. Indicators are read-only and are not write recommendations.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: campaign_id
+        tests: [not_null]
+      - name: budget_status
+        tests:
+          - accepted_values:
+              values: [unknown, over_budget_delivery, capped, underspend, on_track]
+      - name: exhaustion_risk
+        tests:
+          - accepted_values:
+              values: [unknown, high, watch, insufficient_data, low]
+      - name: efficiency_signal
+        tests:
+          - accepted_values:
+              values: [unknown_economics, no_attributed_sales, profitable_dark, inefficient_consumer, profitable, inefficient]
+      - name: settled_days_7d
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 1
+              max_value: 7
+              severity: error
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date, campaign_id]
+
   - name: mart_ppc_keyword_daily
     columns:
       - name: tenant_id
