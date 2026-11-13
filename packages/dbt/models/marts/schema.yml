@@ -151,6 +151,43 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [tenant_id, report_date, campaign_id]
 
+  - name: mart_ppc_monthly_budget_forecast
+    description: Current-month settled account spend and attributed-sales scenarios with explicit successful-ingest coverage and assumptions.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: month_start
+        tests: [not_null]
+      - name: month_end
+        tests: [not_null]
+      - name: elapsed_days
+        tests: [not_null]
+      - name: covered_days
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              severity: error
+      - name: missing_days
+        tests: [not_null]
+      - name: limit_status
+        tests:
+          - accepted_values:
+              values: [NO_LIMIT_CONFIGURED, CURRENCY_MISMATCH, NO_DATA, PROJECTED_OVER_LIMIT, WITHIN_LIMIT]
+      - name: confidence
+        tests:
+          - accepted_values:
+              values: [INSUFFICIENT_DATA, LOW, MEDIUM, HIGH]
+      - name: confidence_score
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+              severity: error
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, month_start]
+
   - name: mart_ppc_keyword_daily
     columns:
       - name: tenant_id
