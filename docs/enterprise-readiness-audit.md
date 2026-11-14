@@ -40,7 +40,7 @@ Status: first pass complete. This document separates core MVP readiness from cli
 
 ### Operations
 
-- Define backup and restore procedure for Postgres.
+- A PostgreSQL custom-format backup and empty scratch-database restore verifier are available in [the backup runbook](postgres-backup-restore.md). Production scheduling, encrypted off-host copy, retention, monitoring, RPO/RTO approval and a recorded restore drill remain deployment tasks.
 - Add production environment checklist for secrets, domain, TLS, worker scheduling and alert routing.
 - Add incident playbook for failed ingestion, stale data, auth expiry and accidental action failure.
 - Add rate-limit monitoring around Amazon APIs.
