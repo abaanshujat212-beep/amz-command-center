@@ -1,6 +1,10 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+	--color-good: #15803d;
+	--color-warn: #b45309;
+	--color-bad: #b91c1c;
+}
 
 :root {
 	color-scheme: light;
