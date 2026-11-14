@@ -33,6 +33,7 @@ logs/
 packages/dbt/profiles.yml
 packages/dbt/.user.yml
 .tmp/
+.data/backups/
 
 # Data — raw exports stay local
 data/

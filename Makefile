@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt backup-postgres verify-postgres-backup actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -19,6 +19,8 @@ help:
 	@echo ""
 	@echo "testdb            create the test database"
 	@echo "migrate-test      apply migrations to TEST_DATABASE_URL"
+	@echo "backup-postgres   write a verified custom-format backup (BACKUP_DIR=...)"
+	@echo "verify-postgres-backup restore into an empty *_scratch or *_restore DB (BACKUP_FILE=...)"
 	@echo "seed              insert tenants and the starter rules"
 	@echo "seed-spapi-sandbox-demo  load clearly labelled local SP-API sandbox fixtures"
 	@echo "test              run pytest (includes the RLS isolation gate)"
@@ -71,6 +73,12 @@ testdb:
 
 migrate-test:
 	@$(ENV) DATABASE_URL=$$TEST_DATABASE_URL python -m packages.db.migrate up
+
+backup-postgres:
+	@$(ENV) python infra/scripts/backup_postgres.py --output-dir "$${BACKUP_DIR:-.data/backups}"
+
+verify-postgres-backup:
+	@$(ENV) python infra/scripts/verify_postgres_restore.py --backup "$${BACKUP_FILE:?set BACKUP_FILE to a .dump file}"
 
 seed:
 	@$(ENV) python -m packages.db.seed
