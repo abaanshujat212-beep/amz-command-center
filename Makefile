@@ -99,13 +99,13 @@ seed-spapi-sandbox-demo:
 	@$(ENV) uv run --locked python -m packages.db.seed_spapi_sandbox_demo
 
 test:
-	@$(ENV) uv run --locked pytest -q
+	@$(ENV) uv run --locked --extra dev pytest -q
 
 fmt:
-	ruff format .
+	uv run --locked --extra dev ruff format .
 
 lint:
-	uv run --locked ruff check .
+	uv run --locked --extra dev ruff check .
 
 dbt:
 	cd packages/dbt && uv run --locked dbt build
