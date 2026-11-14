@@ -1,6 +1,8 @@
 # PPC reconciliation harness
 
-`infra/scripts/reconcile_ppc_exports.py` compares two normalized CSV exports over the same inclusive, settled date window. It is a read-only bridge for collecting repeatable evidence; it does not fetch Seller Central data, certify the modeled KPI definitions, or decide what tolerance is acceptable. Representative Seller Central exports and approved definitions/tolerances are still required before an actual R01.3 sign-off.
+`infra/scripts/export_ppc_marts.py` produces the application-side normalized CSV from the tenant-filtered read-only `copilot.*` views. `infra/scripts/reconcile_ppc_exports.py` compares it with a normalized Seller Central CSV over the same inclusive, settled date window. The exporter reads `mart_ppc_campaign_daily`, `mart_ppc_placement_daily`, and `mart_commerce_sales_daily` inside a read-only transaction. It requires `DATABASE_URL_COPILOT`, an explicit tenant UUID, and an output path; output files use mode `0600`.
+
+This is a repeatable evidence bridge; it does not fetch Seller Central data, certify the modeled KPI definitions, or decide what tolerance is acceptable. The commerce sales model exposes the tenant/day ordered product sales already used as the TACoS denominator by `mart_ppc_campaign_daily`. Representative Seller Central exports and approved definitions/tolerances are still required before an actual R01.3 sign-off.
 
 ## Input contract
 
@@ -21,6 +23,17 @@ report_date,grain,entity_id,placement,is_settled,currency,spend,ad_sales,ad_orde
 The harness cannot verify that the normalized source columns match Amazon's report definitions. Record the mapping from each source column and attribution window in the explicit KPI definitions. Do not normalize seller exports by guessing.
 
 ## Run
+
+Export the settled application rows with the restricted read-only connection. Keep the CSV private:
+
+```sh
+make ppc-mart-export \
+  TENANT_ID=00000000-0000-0000-0000-000000000000 \
+  START_DATE=2026-10-01 END_DATE=2026-10-07 \
+  EXPORT_FILE=.data/reconciliation/application.csv
+```
+
+Normalize the corresponding Seller Central rows using the input contract above, preserving source file hashes separately in your evidence notes. Confirm campaign, placement, and account date coverage match the intended window before comparing totals. Missing source dates are not backfilled as zero.
 
 Pass one `--definition METRIC=TEXT` for each of `spend`, `ad_sales`, `ad_orders`, `acos`, `tacos`, and `budget_amount`. Definitions are copied to the output as provenance; the tool does not interpret them.
 
