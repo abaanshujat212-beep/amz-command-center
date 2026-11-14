@@ -144,7 +144,9 @@ def parse_report_payload(payload: bytes) -> list[dict[str, Any]]:
         records = doc["records"]
     else:
         raise ValueError("Ads report payload must be a JSON list or an object with records[]")
-    return [r for r in records if isinstance(r, dict)]
+    if any(not isinstance(record, dict) for record in records):
+        raise ValueError("Ads report payload contains a non-object record")
+    return records
 
 
 def _value(row: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -277,14 +279,19 @@ def run_requests(conn, tenant_id: str, client: AdsReportClient, requests: Iterab
         result.succeeded = len(requests)
         return result
     for req in requests:
+        report_id: str | None = None
         try:
-            report_id = client.create_report(req.spec.kind, req.date, req.date, req.spec.group_by)
-            payload = client.download_report(client.wait_for_report(report_id))
-            rows = parse_report_payload(payload)
-            result.rows_loaded += upsert_raw_rows(conn, tenant_id, req.dataset, req.date, rows)
+            with conn.transaction():
+                report_id = client.create_report(req.spec.kind, req.date, req.date, req.spec.group_by)
+                payload = client.download_report(client.wait_for_report(report_id))
+                rows = parse_report_payload(payload)
+                rows_loaded = upsert_raw_rows(conn, tenant_id, req.dataset, req.date, rows)
+            result.rows_loaded += rows_loaded
             result.report_ids.append(report_id)
             result.succeeded += 1
         except Exception as exc:
+            if report_id is not None:
+                result.report_ids.append(report_id)
             result.failed += 1
             result.errors.append(f"{req.dataset} {req.date}: {exc}")
     return result
