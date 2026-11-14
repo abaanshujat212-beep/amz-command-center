@@ -91,6 +91,21 @@ models:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns: [tenant_id, report_date, campaign_id]
 
+  - name: mart_commerce_sales_daily
+    description: Settled tenant/day ordered product sales from the same Sales & Traffic staging source used for the PPC TACoS denominator.
+    columns:
+      - name: tenant_id
+        tests: [not_null]
+      - name: report_date
+        tests: [not_null]
+      - name: total_sales
+        tests: [not_null]
+      - name: is_settled
+        tests: [not_null]
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [tenant_id, report_date]
+
   - name: mart_ppc_placement_daily
     columns:
       - name: tenant_id
