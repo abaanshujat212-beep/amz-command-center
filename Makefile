@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql sync migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt backup-postgres verify-postgres-backup rotate-token-vault actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql sync migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt backup-postgres verify-postgres-backup raw-monthly-coverage rotate-token-vault actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -22,6 +22,7 @@ help:
 	@echo "migrate-test      apply migrations to TEST_DATABASE_URL"
 	@echo "backup-postgres   write a verified custom-format backup (BACKUP_DIR=...)"
 	@echo "verify-postgres-backup restore into an empty *_scratch or *_restore DB (BACKUP_FILE=...)"
+	@echo "raw-monthly-coverage export per-tenant raw row counts by month (REPORT_DIR=...)"
 	@echo "rotate-token-vault dry-run one tenant; APPLY=true persists rewraps (TENANT_ID=...)"
 	@echo "seed              insert tenants and the starter rules"
 	@echo "seed-spapi-sandbox-demo  load clearly labelled local SP-API sandbox fixtures"
@@ -84,6 +85,9 @@ backup-postgres:
 
 verify-postgres-backup:
 	@$(ENV) uv run --locked python infra/scripts/verify_postgres_restore.py --backup "$${BACKUP_FILE:?set BACKUP_FILE to a .dump file}"
+
+raw-monthly-coverage:
+	@$(ENV) uv run --locked python infra/scripts/report_raw_monthly_coverage.py --output-dir "$${REPORT_DIR:-.data/raw-coverage}"
 
 rotate-token-vault:
 	@$(ENV) uv run --locked python -m services.ingest.security.rotate_vault --tenant-id "$(TENANT_ID)" $(if $(filter true,$(APPLY)),--apply,)
