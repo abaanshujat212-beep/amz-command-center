@@ -88,6 +88,7 @@ data means rules acting on a stale picture.
 - [ ] Client registers private developer app and self-authorises (above)
 - [ ] Credentials received via password manager, stored through the token vault
       (envelope-encrypted, `key_version` recorded), never in `.env` in production
+- [ ] Plan KEK custody and rotation using the [token-vault rotation runbook](token-vault-key-rotation.md)
 - [ ] `amazon_connection` row created, `authorization_expires_at` set to +12 months
 - [ ] `GET /v2/profiles` returns the UK profile — confirms the Ads consent worked
 - [ ] **95-day Ads backfill run the same day**

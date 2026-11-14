@@ -141,7 +141,7 @@ def normalize_row(row: dict[str, Any], fallback_date: dt.date) -> tuple[dt.date,
 def load_sp_connection(conn, tenant_id: str) -> SpConnection:
     row = conn.execute(
         """
-        select id, region, refresh_token_encrypted
+        select id, region, refresh_token_encrypted, key_version
           from amazon_connection
          where tenant_id = %s and provider = 'sp_api' and status = 'active'
          limit 1
@@ -156,7 +156,7 @@ def load_sp_connection(conn, tenant_id: str) -> SpConnection:
     client_secret = os.environ.get("SPAPI_CLIENT_SECRET")
     if not client_id or not client_secret:
         raise RuntimeError("SPAPI_CLIENT_ID and SPAPI_CLIENT_SECRET must be set")
-    return SpConnection(str(row["id"]), row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])))
+    return SpConnection(str(row["id"]), row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"]), row.get("key_version", 1)))
 
 
 def persist_rotated_refresh_token(conn, connection: SpConnection, client: SalesTrafficClient) -> None:
