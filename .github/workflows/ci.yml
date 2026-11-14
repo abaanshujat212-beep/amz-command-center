@@ -19,16 +19,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+
       - name: Install package with dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e '.[dev]'
+        run: uv sync --locked --extra dev
 
       - name: Ruff
-        run: ruff check .
+        run: uv run --locked ruff check .
 
       - name: Pytest without database
-        run: pytest -q -m "not db"
+        run: uv run --locked pytest -q -m "not db"
 
   postgres-gate:
     name: Migration and Postgres-backed tests
@@ -62,31 +65,34 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+
       - name: Install package with dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e '.[dev]'
+        run: uv sync --locked --extra dev
 
       - name: Apply migrations
-        run: python -m packages.db.migrate up
+        run: uv run --locked python -m packages.db.migrate up
 
       - name: Prove migration idempotency
-        run: python -m packages.db.migrate up
+        run: uv run --locked python -m packages.db.migrate up
 
       - name: Migration status
-        run: python -m packages.db.migrate status
+        run: uv run --locked python -m packages.db.migrate status
 
       - name: Seed dev data
-        run: python -m packages.db.seed
+        run: uv run --locked python -m packages.db.seed
 
       - name: Create test database
         run: psql postgresql://axaty:axaty@localhost:5432/postgres -c "create database axaty_test"
 
       - name: Apply migrations to test database
-        run: DATABASE_URL=$TEST_DATABASE_URL python -m packages.db.migrate up
+        run: DATABASE_URL=$TEST_DATABASE_URL uv run --locked python -m packages.db.migrate up
 
       - name: Postgres-backed pytest
-        run: pytest -q -m db
+        run: uv run --locked pytest -q -m db
 
   dbt-build:
     name: dbt build
@@ -119,16 +125,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+
       - name: Install package with dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e '.[dev]'
+        run: uv sync --locked --extra dev
 
       - name: Apply migrations
-        run: python -m packages.db.migrate up
+        run: uv run --locked python -m packages.db.migrate up
 
       - name: Seed dev data
-        run: python -m packages.db.seed
+        run: uv run --locked python -m packages.db.seed
 
       - name: Write dbt profile
         working-directory: packages/dbt
@@ -136,11 +145,11 @@ jobs:
 
       - name: dbt deps
         working-directory: packages/dbt
-        run: dbt deps
+        run: uv run --locked dbt deps
 
       - name: dbt build
         working-directory: packages/dbt
-        run: dbt build
+        run: uv run --locked dbt build
 
   web-build:
     name: Web typecheck and build
@@ -158,7 +167,7 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
