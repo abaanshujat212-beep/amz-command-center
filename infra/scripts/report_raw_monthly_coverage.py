@@ -45,7 +45,7 @@ def coverage_sql() -> str:
         from public.tenant t
         cross join lateral generate_series(
             date_trunc('month', t.created_at at time zone 'UTC'),
-            date_trunc('month', current_timestamp at time zone 'UTC'),
+            date_trunc('month', current_timestamp at time zone 'UTC') - interval '1 month',
             interval '1 month'
         ) as months(month_start)
     ), counts as (
