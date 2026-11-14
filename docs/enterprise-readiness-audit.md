@@ -41,6 +41,7 @@ Status: first pass complete. This document separates core MVP readiness from cli
 ### Operations
 
 - A PostgreSQL custom-format backup and empty scratch-database restore verifier are available in [the backup runbook](postgres-backup-restore.md). Production scheduling, encrypted off-host copy, retention, monitoring, RPO/RTO approval and a recorded restore drill remain deployment tasks.
+- A read-only [monthly raw-data coverage report](raw-monthly-coverage.md) emits explicit zero-count tenant/source/month rows; scheduling it and routing failures remain deployment tasks.
 - The token vault now has a [versioned KEK rotation procedure](token-vault-key-rotation.md), a tenant-scoped dry-run/apply rewrap command and dual-version reads. Secret-manager setup, protected historical key retention and an operator rotation drill remain deployment tasks.
 - Add production environment checklist for secrets, domain, TLS, worker scheduling and alert routing.
 - Add incident playbook for failed ingestion, stale data, auth expiry and accidental action failure.
