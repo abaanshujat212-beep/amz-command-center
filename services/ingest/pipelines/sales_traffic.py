@@ -89,13 +89,16 @@ def parse_report_payload(payload: bytes) -> list[dict[str, Any]]:
         text = payload.decode("utf-8")
     doc = json.loads(text)
     if isinstance(doc, list):
-        return [r for r in doc if isinstance(r, dict)]
-    if isinstance(doc, dict):
-        if isinstance(doc.get("salesAndTrafficByAsin"), list):
-            return [r for r in doc["salesAndTrafficByAsin"] if isinstance(r, dict)]
-        if isinstance(doc.get("records"), list):
-            return [r for r in doc["records"] if isinstance(r, dict)]
-    raise ValueError("Sales & Traffic payload must contain salesAndTrafficByAsin[] or records[]")
+        records = doc
+    elif isinstance(doc, dict) and isinstance(doc.get("salesAndTrafficByAsin"), list):
+        records = doc["salesAndTrafficByAsin"]
+    elif isinstance(doc, dict) and isinstance(doc.get("records"), list):
+        records = doc["records"]
+    else:
+        raise ValueError("Sales & Traffic payload must contain salesAndTrafficByAsin[] or records[]")
+    if any(not isinstance(record, dict) for record in records):
+        raise ValueError("Sales & Traffic payload contains a non-object record")
+    return records
 
 
 def _nested(row: dict[str, Any], *path: str) -> Any:
@@ -240,14 +243,19 @@ def run_requests(conn, tenant_id: str, client: SalesTrafficClient, requests: Ite
         result.succeeded = len(requests)
         return result
     for req in requests:
+        report_id: str | None = None
         try:
-            report_id = client.create_report(SALES_AND_TRAFFIC, req.date, req.date, REPORT_OPTIONS)
-            document_id = client.wait_for_report(report_id)
-            rows = parse_report_payload(client.download_report(document_id))
-            result.rows_loaded += upsert_raw_rows(conn, tenant_id, req.date, rows)
+            with conn.transaction():
+                report_id = client.create_report(SALES_AND_TRAFFIC, req.date, req.date, REPORT_OPTIONS)
+                document_id = client.wait_for_report(report_id)
+                rows = parse_report_payload(client.download_report(document_id))
+                rows_loaded = upsert_raw_rows(conn, tenant_id, req.date, rows)
+            result.rows_loaded += rows_loaded
             result.report_ids.append(report_id)
             result.succeeded += 1
         except Exception as exc:
+            if report_id is not None:
+                result.report_ids.append(report_id)
             result.failed += 1
             result.errors.append(f"{DATASET} {req.date}: {exc}")
     return result

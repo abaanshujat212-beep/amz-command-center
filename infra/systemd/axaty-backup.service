@@ -1,0 +1,19 @@
+[Unit]
+Description=Create a verified AXATY PostgreSQL backup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=axaty
+Group=axaty
+WorkingDirectory=/opt/axaty/command-center
+EnvironmentFile=/etc/axaty/backup.env
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/backups/axaty
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ExecStart=/opt/axaty/command-center/.venv/bin/python infra/scripts/backup_postgres.py --output-dir /var/backups/axaty
