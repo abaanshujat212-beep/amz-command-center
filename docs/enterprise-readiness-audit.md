@@ -42,6 +42,7 @@ Status: first pass complete. This document separates core MVP readiness from cli
 
 - A PostgreSQL custom-format backup and empty scratch-database restore verifier are available in [the backup runbook](postgres-backup-restore.md). Production scheduling, encrypted off-host copy, retention, monitoring, RPO/RTO approval and a recorded restore drill remain deployment tasks.
 - A read-only [monthly raw-data coverage report](raw-monthly-coverage.md) emits explicit zero-count tenant/source/month rows; scheduling it and routing failures remain deployment tasks.
+- An operator-only [tenant erasure command](tenant-erasure.md) previews tenant-scoped rows, requires explicit double confirmation, deletes transactionally and verifies zero remaining tenant rows. Production use still requires an approved retention/legal-hold policy and an authorized operator.
 - A pinned [Gitleaks workflow](../.github/workflows/secret-scan.yml) scans pull requests, main pushes and weekly history. Organization-owned repositories must configure `GITLEAKS_LICENSE` as an Actions secret; findings still require credential rotation and incident handling.
 - A pinned [SBOM workflow](../.github/workflows/sbom.yml) publishes a CycloneDX dependency inventory as a 30-day workflow artifact on PRs, main pushes and monthly runs.
 - The token vault now has a [versioned KEK rotation procedure](token-vault-key-rotation.md), a tenant-scoped dry-run/apply rewrap command and dual-version reads. Secret-manager setup, protected historical key retention and an operator rotation drill remain deployment tasks.
