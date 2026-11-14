@@ -210,7 +210,7 @@ def _run_status(result: DatasetResult) -> str:
 def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     row = conn.execute(
         """
-        select c.region, c.refresh_token_encrypted, p.profile_id
+        select c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
           from amazon_connection c
           left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
          where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
@@ -227,7 +227,7 @@ def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     client_secret = os.environ.get("ADS_CLIENT_SECRET")
     if not client_id or not client_secret:
         raise RuntimeError("ADS_CLIENT_ID and ADS_CLIENT_SECRET must be set")
-    return AdsConnection(row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"])), row["profile_id"])
+    return AdsConnection(row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"]), row.get("key_version", 1)), row["profile_id"])
 
 
 def read_watermark(conn, tenant_id: str, dataset: str) -> dt.date | None:

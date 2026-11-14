@@ -270,7 +270,7 @@ def finish_worker_run(
 
 def load_ads_client(conn, tenant_id: str) -> AdsClient:
     row = conn.execute(
-        """select c.id, c.region, c.refresh_token_encrypted, p.profile_id
+        """select c.id, c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
           from amazon_connection c
           left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
          where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
@@ -287,7 +287,7 @@ def load_ads_client(conn, tenant_id: str) -> AdsClient:
         AdsCredentials(
             client_id,
             client_secret,
-            unseal(bytes(row["refresh_token_encrypted"])),
+            unseal(bytes(row["refresh_token_encrypted"]), row.get("key_version", 1)),
             row["profile_id"],
         ),
         tenant_id=tenant_id,
