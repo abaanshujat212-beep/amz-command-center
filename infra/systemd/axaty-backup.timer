@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly AXATY PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 02:17:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=axaty-backup.service
+
+[Install]
+WantedBy=timers.target
