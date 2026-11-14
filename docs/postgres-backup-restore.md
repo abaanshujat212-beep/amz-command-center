@@ -1,6 +1,6 @@
 # PostgreSQL backup and restore verification
 
-These commands create and verify PostgreSQL custom-format backups. They are an operator tool, not a configured production schedule: deploy them on a trusted host with PostgreSQL client tools, `DATABASE_URL`, and encrypted off-host storage configured. Do not commit dumps, manifests, connection strings, or credentials.
+These commands create and verify PostgreSQL custom-format backups. The repository includes an optional systemd timer template for a nightly local dump; encrypted off-host storage, retention, alert routing, and recovery objectives still need deployment configuration. Do not commit dumps, manifests, connection strings, or credentials.
 
 ## Create a backup
 
@@ -11,6 +11,23 @@ make backup-postgres BACKUP_DIR=/var/backups/axaty
 ```
 
 The command writes a mode-0600 custom-format `.dump`, a mode-0600 `.globals.sql` containing PostgreSQL roles/tablespaces, and a JSON manifest with filenames, database name, UTC timestamp and SHA-256 digests. The archive is validated with `pg_restore --list` before publishing the files. The connection password is placed in a short-lived mode-0600 pgpass file; it is removed when the command exits. The globals file can contain password hashes and must be treated as highly sensitive. Protect the destination directory and copy all three artifacts to encrypted off-host storage. Configure off-host encryption, access control, retention and monitoring in the deployment platform; a successful local dump alone is not a backup strategy.
+
+## Schedule nightly backups with systemd
+
+The templates in `infra/systemd/` assume the application is deployed at `/opt/axaty/command-center`, runs as the `axaty` OS user, and stores backups under `/var/backups/axaty`. Adjust those paths and identity for the deployment host. Install the files and create a root-owned environment file containing the operator `DATABASE_URL`:
+
+```sh
+sudo install -m 0644 infra/systemd/axaty-backup.service /etc/systemd/system/
+sudo install -m 0644 infra/systemd/axaty-backup.timer /etc/systemd/system/
+sudo install -m 0644 infra/systemd/axaty-backup.tmpfiles /etc/tmpfiles.d/axaty-backup.conf
+sudo install -d -m 0700 -o root -g root /etc/axaty
+sudo install -m 0600 -o root -g root /path/from/secret-manager/backup.env /etc/axaty/backup.env
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/axaty-backup.conf
+sudo systemctl daemon-reload
+sudo systemctl enable --now axaty-backup.timer
+```
+
+The timer runs daily at 02:17 UTC with a random delay of up to 15 minutes and runs once after reboot if a scheduled execution was missed. Check the last result with `systemctl status axaty-backup.service` and logs with `journalctl -u axaty-backup.service`. Configure deployment monitoring to alert on a failed service and copy successful artifacts to encrypted off-host storage. The timer does not perform that copy or prune older backups.
 
 Set a documented recovery point objective (RPO), recovery time objective (RTO), and retention schedule before production launch. Alert if a scheduled backup or off-host copy fails. Keep multiple daily backups and a longer monthly history according to the client's retention agreement. Never put a credential-bearing database URL in command-line arguments, logs, cron definitions, or this repository.
 

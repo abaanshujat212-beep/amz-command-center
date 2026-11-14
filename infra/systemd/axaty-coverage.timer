@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly AXATY raw data coverage report
+
+[Timer]
+OnCalendar=*-*-01 03:17:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+Unit=axaty-coverage.service
+
+[Install]
+WantedBy=timers.target
