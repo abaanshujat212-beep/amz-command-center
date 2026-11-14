@@ -5,26 +5,27 @@ Run this checklist before opening or merging MVP implementation PRs.
 ## Fast checks
 
 ```bash
-ruff check .
-pytest -q -m "not db"
+uv sync --locked --extra dev
+uv run --locked ruff check .
+uv run --locked pytest -q -m "not db"
 ```
 
 ## Database-backed checks
 
 ```bash
 make up
-python -m packages.db.migrate up
-python -m packages.db.migrate up  # idempotency gate
-python -m packages.db.migrate status
-python -m packages.db.seed
-pytest -q -m db
+uv run --locked python -m packages.db.migrate up
+uv run --locked python -m packages.db.migrate up  # idempotency gate
+uv run --locked python -m packages.db.migrate status
+uv run --locked python -m packages.db.seed
+uv run --locked pytest -q -m db
 ```
 
 ## Web checks
 
 ```bash
 cd apps/web
-npm install
+npm ci
 npm run typecheck
 npm run build
 ```

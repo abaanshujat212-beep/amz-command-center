@@ -59,17 +59,18 @@ Completed MVP PRs:
 ### Main local gates
 
 ```bash
-ruff check .
-pytest -q -m "not db"
+uv sync --locked --extra dev
+uv run --locked ruff check .
+uv run --locked pytest -q -m "not db"
 
 make up
-python -m packages.db.migrate up
-python -m packages.db.migrate up
-python -m packages.db.migrate status
-python -m packages.db.seed
-pytest -q -m db
+uv run --locked python -m packages.db.migrate up
+uv run --locked python -m packages.db.migrate up
+uv run --locked python -m packages.db.migrate status
+uv run --locked python -m packages.db.seed
+uv run --locked pytest -q -m db
 
-cd apps/web && npm install && npm run typecheck && npm run build
+cd apps/web && npm ci && npm run typecheck && npm run build
 ```
 
 See also: `docs/local-gates.md`.
@@ -221,7 +222,7 @@ python -m packages.db.migrate up
 python -m packages.db.seed
 pytest
 
-cd apps/web && npm install && npm run dev
+cd apps/web && npm ci && npm run dev
 ```
 
 Useful commands:

@@ -1,4 +1,4 @@
-.PHONY: help up down restart logs ps psql migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt backup-postgres verify-postgres-backup rotate-token-vault actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
+.PHONY: help up down restart logs ps psql sync migrate migrate-status migrate-down migrate-baseline testdb migrate-test seed seed-spapi-sandbox-demo test fmt lint dbt backup-postgres verify-postgres-backup rotate-token-vault actions actions-live reports scheduler scheduler-history scheduler-catch-up clean
 
 COMPOSE := docker compose --env-file .env -f infra/docker-compose.yml
 ENV := set -a; . ./.env; set +a;
@@ -13,6 +13,7 @@ help:
 	@echo "psql              open a psql shell on the analytics database"
 	@echo ""
 	@echo "migrate           apply pending migrations (ledger-tracked, safe to re-run)"
+	@echo "sync              install locked Python dependencies from uv.lock"
 	@echo "migrate-status    show applied vs pending, and which have a down file"
 	@echo "migrate-down      revert the last migration (STEPS=2 for more)"
 	@echo "migrate-baseline  adopt a DB already migrated by the old shell loop"
@@ -56,69 +57,72 @@ ps:
 psql:
 	$(COMPOSE) exec postgres psql -U $${POSTGRES_USER:-axaty} -d $${POSTGRES_DB:-axaty}
 
+sync:
+	uv sync --locked --extra dev
+
 migrate:
-	@$(ENV) python -m packages.db.migrate up
+	@$(ENV) uv run --locked python -m packages.db.migrate up
 
 migrate-status:
-	@$(ENV) python -m packages.db.migrate status
+	@$(ENV) uv run --locked python -m packages.db.migrate status
 
 migrate-down:
-	@$(ENV) python -m packages.db.migrate down --steps $(STEPS)
+	@$(ENV) uv run --locked python -m packages.db.migrate down --steps $(STEPS)
 
 migrate-baseline:
-	@$(ENV) python -m packages.db.migrate baseline
+	@$(ENV) uv run --locked python -m packages.db.migrate baseline
 
 testdb:
 	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-axaty} -d postgres \
 		-c "create database $${TEST_DB_NAME:-axaty_test}" || echo "test database already exists"
 
 migrate-test:
-	@$(ENV) DATABASE_URL=$$TEST_DATABASE_URL python -m packages.db.migrate up
+	@$(ENV) DATABASE_URL=$$TEST_DATABASE_URL uv run --locked python -m packages.db.migrate up
 
 backup-postgres:
-	@$(ENV) python infra/scripts/backup_postgres.py --output-dir "$${BACKUP_DIR:-.data/backups}"
+	@$(ENV) uv run --locked python infra/scripts/backup_postgres.py --output-dir "$${BACKUP_DIR:-.data/backups}"
 
 verify-postgres-backup:
-	@$(ENV) python infra/scripts/verify_postgres_restore.py --backup "$${BACKUP_FILE:?set BACKUP_FILE to a .dump file}"
+	@$(ENV) uv run --locked python infra/scripts/verify_postgres_restore.py --backup "$${BACKUP_FILE:?set BACKUP_FILE to a .dump file}"
 
 rotate-token-vault:
-	@$(ENV) python -m services.ingest.security.rotate_vault --tenant-id "$(TENANT_ID)" $(if $(filter true,$(APPLY)),--apply,)
+	@$(ENV) uv run --locked python -m services.ingest.security.rotate_vault --tenant-id "$(TENANT_ID)" $(if $(filter true,$(APPLY)),--apply,)
 
 seed:
-	@$(ENV) python -m packages.db.seed
+	@$(ENV) uv run --locked python -m packages.db.seed
 
 seed-spapi-sandbox-demo:
-	@$(ENV) python -m packages.db.seed_spapi_sandbox_demo
+	@$(ENV) uv run --locked python -m packages.db.seed_spapi_sandbox_demo
 
 test:
-	@$(ENV) pytest -q
+	@$(ENV) uv run --locked pytest -q
 
 fmt:
 	ruff format .
 
 lint:
-	ruff check .
+	uv run --locked ruff check .
 
 dbt:
-	cd packages/dbt && dbt build
+	cd packages/dbt && uv run --locked dbt build
 
 actions:
-	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID)
+	@$(ENV) uv run --locked python -m services.actions.worker --tenant-id $(TENANT_ID)
 
 actions-live:
-	@$(ENV) python -m services.actions.worker --tenant-id $(TENANT_ID) --live-ads
+	@$(ENV) uv run --locked python -m services.actions.worker --tenant-id $(TENANT_ID) --live-ads
 
 reports:
-	@$(ENV) python -m services.reports.worker --tenant-id $(TENANT_ID)
+	@$(ENV) uv run --locked python -m services.reports.worker --tenant-id $(TENANT_ID)
 
 scheduler:
-	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID)
+	@$(ENV) uv run --locked python -m services.scheduler.runner --tenant-id $(TENANT_ID)
 
 scheduler-history:
-	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-history --skip-rules
+	@$(ENV) uv run --locked python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-history --skip-rules
 
 scheduler-catch-up:
-	@$(ENV) python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-catch-up --skip-rules
+	@$(ENV) uv run --locked python -m services.scheduler.runner --tenant-id $(TENANT_ID) --show-catch-up --skip-rules
 
 clean:
 	$(COMPOSE) down -v
