@@ -276,7 +276,6 @@ def run_requests(conn, tenant_id: str, client: AdsReportClient, requests: Iterab
     dataset = requests[0].dataset if requests else "unknown"
     result = DatasetResult(dataset=dataset, requested=len(requests))
     if dry_run:
-        result.succeeded = len(requests)
         return result
     for req in requests:
         report_id: str | None = None
@@ -304,12 +303,17 @@ def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, d
         raise ValueError(f"unknown Ads dataset(s): {unknown}")
     results: list[DatasetResult] = []
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
-        ads_connection = None if dry_run and client_factory is None else load_ads_connection(conn, tenant_id)
-        client = (client_factory or _default_client)(ads_connection) if ads_connection else _DryClient()
+        if dry_run:
+            for dataset in selected:
+                requests = requests_for_dataset(dataset, read_watermark(conn, tenant_id, dataset), today=today)
+                results.append(DatasetResult(dataset=dataset, requested=len(requests)))
+            return RunResult(tenant_id, True, results)
+        ads_connection = load_ads_connection(conn, tenant_id)
+        client = (client_factory or _default_client)(ads_connection)
         for dataset in selected:
             requests = requests_for_dataset(dataset, read_watermark(conn, tenant_id, dataset), today=today)
             run_id = start_pipeline_run(conn, tenant_id, dataset, [r.date for r in requests])
-            result = run_requests(conn, tenant_id, client, requests, dry_run=dry_run)
+            result = run_requests(conn, tenant_id, client, requests, dry_run=False)
             result.dataset = dataset
             finish_pipeline_run(conn, run_id, result)
             if result.failed == 0:
@@ -321,12 +325,3 @@ def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, d
 
 def _default_client(connection: AdsConnection) -> AdsClient:
     return AdsClient(AdsCredentials(connection.client_id, connection.client_secret, connection.refresh_token, connection.profile_id), tenant_id=None, region=connection.region)
-
-
-class _DryClient:
-    def create_report(self, report_kind, start_date, end_date, group_by=()):
-        return f"dry-{report_kind}-{start_date}"
-    def wait_for_report(self, report_id: str, timeout_s: int = 1800) -> str:
-        return f"dry://{report_id}"
-    def download_report(self, url: str) -> bytes:
-        return b"[]"

@@ -241,7 +241,6 @@ def run_requests(conn, tenant_id: str, client: SalesTrafficClient, requests: Ite
     requests = list(requests)
     result = RunResult(tenant_id=tenant_id, dry_run=dry_run, requested=len(requests))
     if dry_run:
-        result.succeeded = len(requests)
         return result
     for req in requests:
         report_id: str | None = None
