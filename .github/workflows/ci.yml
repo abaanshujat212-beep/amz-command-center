@@ -172,6 +172,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Offline web behavior contracts
+        run: node --experimental-transform-types --test scripts/test-external-capability-availability.mjs tests/*.test.mjs
+
       - name: Build
         env:
           DATABASE_URL_APP: postgresql://axaty_app:axaty_app@localhost:5432/axaty

@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg"
 import { query } from "@/lib/db"
+import { externalCapabilityAvailability } from "@/lib/external-capability-availability"
 
 export type DependencyReadiness = {
 	marketplace_id: string
@@ -28,5 +29,5 @@ export async function readinessSnapshot(client: PoolClient) {
 	const modules = await query<ModuleState>(client,
 		`select marketplace_id, module_key, entitlement_state, visibility_state, reason_code
 		 from module_state order by module_key`)
-	return { dependencies, modules }
+	return { dependencies, modules, externalCapabilities: externalCapabilityAvailability() }
 }

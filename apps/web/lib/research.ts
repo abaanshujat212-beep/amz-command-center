@@ -1,3 +1,4 @@
+import type { StoredEvidence } from "@/lib/research-evidence"
 import type { PoolClient, QueryResultRow } from "pg"
 import { query, type TenantRole } from "@/lib/db"
 
@@ -78,4 +79,20 @@ export async function setResearchDisposition(client: PoolClient, tenantId: strin
 	const rows = await query<{ id: string }>(client, "update research_candidate set status=$1,updated_at=now() where tenant_id=$2 and id=$3 returning id", [status, tenantId, id])
 	if (!rows[0]) throw new ResearchInputError("candidate not found", 404)
 	return rows[0]
+}
+
+type ResearchEvidenceRow = QueryResultRow & StoredEvidence & { id: string; metric: string }
+
+export async function getResearchEvidence(client: PoolClient, tenantId: string, candidateId: string) {
+	if (!UUID.test(candidateId)) return null
+	const [candidate] = await query<{id:string;title:string;project_name:string;candidate_kind:"own_catalog"|"market"}>(
+		client, `select c.id::text,c.title,p.name project_name,c.candidate_kind
+			from research_candidate c join research_project p on p.id=c.project_id and p.tenant_id=c.tenant_id
+			where c.tenant_id=$1 and c.id=$2`, [tenantId,candidateId])
+	if (!candidate) return null
+	const rows = await query<ResearchEvidenceRow>(client, `select id::text,metric,numeric_value::text,text_value,unit,
+			provider,observed_at::text,method,evidence_scope,completeness,evidence_ref
+		from research_observation where tenant_id=$1 and candidate_id=$2
+		order by observed_at desc,id desc limit 101`, [tenantId,candidate.id])
+	return {candidate, observations:rows.slice(0,100), limited:rows.length>100}
 }
