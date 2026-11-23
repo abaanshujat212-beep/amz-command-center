@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import hashlib
+import json
 import os
 from typing import Protocol
 
@@ -13,6 +16,15 @@ from services.actions.worker import load_ads_client, persist_rotated_refresh_tok
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://axaty:axaty@localhost:5432/axaty")
 PLACEMENTS = ("PLACEMENT_TOP", "PLACEMENT_PRODUCT_PAGE", "PLACEMENT_REST_OF_SEARCH")
+API_VERSION = "sp-campaigns-v3"
+STRATEGIES = {
+    "manual": "fixed",
+    "fixed": "fixed",
+    "legacyforsales": "dynamic_down_only",
+    "dynamic_down_only": "dynamic_down_only",
+    "autoforsales": "dynamic_up_down",
+    "dynamic_up_down": "dynamic_up_down",
+}
 
 
 class CampaignClient(Protocol):
@@ -37,6 +49,38 @@ def extract_placement_rows(campaign: dict) -> list[dict]:
     ]
 
 
+def extract_native_control_row(campaign: dict, *, observed_at: dt.datetime) -> dict | None:
+    campaign_id = str(campaign.get("campaignId") or campaign.get("campaign_id") or "")
+    if not campaign_id:
+        return None
+    dynamic = campaign.get("dynamicBidding") or {}
+    raw_strategy = str(dynamic.get("strategy") or campaign.get("biddingStrategy") or "unknown")
+    strategy_key = raw_strategy.replace("-", "_").replace(" ", "_").lower()
+    strategy = STRATEGIES.get(strategy_key.replace("_", ""), STRATEGIES.get(strategy_key, raw_strategy or "unknown"))
+    if observed_at.tzinfo is None:
+        raise ValueError("observed_at must include a timezone")
+    # Freshness is the successful read time, not the campaign modification time.
+    parsed = observed_at
+    return {
+        "campaign_id": campaign_id,
+        "bidding_strategy": strategy,
+        "bidding_strategy_supported": strategy in set(STRATEGIES.values()),
+        "budget_rule_active": control_flag(campaign.get("budgetRuleActive")),
+        "schedule_rule_active": control_flag(campaign.get("scheduleRuleActive")),
+        "rule_based_bidding_active": control_flag(campaign.get("biddingRuleActive")),
+        "cost_control_active": control_flag(campaign.get("costControl", dynamic.get("costControl"))),
+        "source_observed_at": parsed,
+        "source_api_version": API_VERSION,
+        "source_fingerprint": hashlib.sha256(json.dumps(campaign, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest(),
+        "source_record": campaign,
+    }
+
+
+def control_flag(value) -> bool | None:
+    # Missing, string and object values cannot prove a control is inactive.
+    return value if type(value) is bool else None
+
+
 def upsert_rows(conn, tenant_id: str, rows: list[dict]) -> int:
     loaded = 0
     for row in rows:
@@ -51,13 +95,38 @@ def upsert_rows(conn, tenant_id: str, rows: list[dict]) -> int:
     return loaded
 
 
+def insert_native_control_rows(conn, tenant_id: str, rows: list[dict]) -> int:
+    loaded = 0
+    for row in rows:
+        result = conn.execute(
+            """
+            insert into campaign_native_control_state (
+              tenant_id, campaign_id, bidding_strategy, bidding_strategy_supported,
+              budget_rule_active, schedule_rule_active, rule_based_bidding_active,
+              cost_control_active, source_observed_at, source_api_version,
+              source_fingerprint, source_record
+            ) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            on conflict (tenant_id, campaign_id, source_api_version, source_fingerprint, source_observed_at) do nothing
+            returning id
+            """,
+            (tenant_id, row["campaign_id"], row["bidding_strategy"], row["bidding_strategy_supported"], row["budget_rule_active"], row["schedule_rule_active"], row["rule_based_bidding_active"], row["cost_control_active"], row["source_observed_at"], row["source_api_version"], row["source_fingerprint"], psycopg.types.json.Jsonb(row["source_record"])),
+        )
+        if result.fetchone() is not None:
+            loaded += 1
+    return loaded
+
+
 def sync(client: CampaignClient, conn, tenant_id: str) -> int:
     loaded = 0
     next_token = None
     while True:
         payload = client.list_campaigns(next_token=next_token)
-        rows = [row for campaign in _campaigns(payload) for row in extract_placement_rows(campaign)]
+        campaigns = _campaigns(payload)
+        observed_at = dt.datetime.now(dt.timezone.utc)
+        rows = [row for campaign in campaigns for row in extract_placement_rows(campaign)]
         loaded += upsert_rows(conn, tenant_id, rows)
+        native_rows = [row for campaign in campaigns if (row := extract_native_control_row(campaign, observed_at=observed_at)) is not None]
+        insert_native_control_rows(conn, tenant_id, native_rows)
         next_token = payload.get("nextToken") or payload.get("next_token")
         if not next_token:
             return loaded

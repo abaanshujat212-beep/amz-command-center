@@ -1,5 +1,6 @@
 import { actionCapability, liveActionSupport } from "@/lib/action-support";
 import { query, withTenant } from "@/lib/db";
+import { nativeControlApprovalConflict } from "@/lib/native-control-approval";
 
 type Decision = "approved" | "rejected";
 export class ApprovalDecisionError extends Error {
@@ -75,6 +76,9 @@ export async function decideAction(input: {
         if (!support.supported) {
           throw new ApprovalDecisionError(support.message, 409);
         }
+
+        const nativeConflict = await nativeControlApprovalConflict(c, candidate[0].id);
+        if (nativeConflict) throw new ApprovalDecisionError(nativeConflict, 409);
 
         const collisions = await query<Collision>(
           c,
