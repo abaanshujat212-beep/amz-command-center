@@ -17,6 +17,7 @@ from services.actions import state_machine as sm
 from services.actions.apply_guardrails import ApplyGuardrailError, validate_apply_guardrails
 from services.actions.audit import EventType, append_event, event_for, sanitize
 from services.actions.human_control import active_control, complete_one_time_control
+from services.actions.native_controls import evaluate_native_control, load_native_control_state
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
 from services.ingest.security.vault import seal, unseal
 from services.rules.settings import GuardrailConfigError, load_tenant_guard_config
@@ -574,6 +575,23 @@ def validate_live_batch(
     return eligible
 
 
+def validate_native_control_batch(
+    conn, actions: list[sm.Action], result: WorkerResult, *, now: dt.datetime, correlation_key: str
+) -> list[sm.Action]:
+    """Block live writes that would fight fresh Amazon-native controls."""
+    eligible = []
+    with conn.cursor(row_factory=dict_row) as cur:
+        for action in actions:
+            state = load_native_control_state(cur, action)
+            decision = evaluate_native_control(action, state, now=now)
+            if not decision.allowed:
+                options = f" options={','.join(decision.ownership_options)}" if decision.ownership_options else ""
+                block_live_actions(conn, [action], result, now=now, correlation_key=correlation_key, error=f"{decision.reason_code}: {decision.explanation}{options}")
+                continue
+            eligible.append(action)
+    return eligible
+
+
 def run_once(
     tenant_id: str,
     *,
@@ -612,6 +630,13 @@ def run_once(
                         conn, actions, result, now=now, correlation_key=str(run_id), error=str(exc)
                     )
                     finish_worker_run(conn, run_id, result, error=str(exc))
+                    conn.commit()
+                    return result
+                actions = validate_native_control_batch(
+                    conn, actions, result, now=now, correlation_key=str(run_id)
+                )
+                if not actions:
+                    finish_worker_run(conn, run_id, result, error="all actions blocked by Amazon native controls")
                     conn.commit()
                     return result
                 actions = validate_live_batch(

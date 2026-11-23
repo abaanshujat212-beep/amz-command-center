@@ -112,6 +112,11 @@ def wire_run(monkeypatch, conn, actions):
         "validate_live_batch",
         lambda _conn, batch, _cfg, _result, **_kwargs: batch,
     )
+    monkeypatch.setattr(
+        worker,
+        "validate_native_control_batch",
+        lambda _conn, batch, _result, **_kwargs: batch,
+    )
 
 
 def test_changed_settings_block_before_credentials(monkeypatch):
@@ -177,3 +182,22 @@ def test_authorized_live_path_uses_injected_client(monkeypatch):
     wire_run(monkeypatch, conn, [action])
     result = worker.run_once("T1", live_ads=True, client=DryRunActionClient())
     assert (result.applied, result.failed) == (1, 0)
+
+
+def test_native_control_conflict_blocks_before_credentials(monkeypatch):
+    conn = WorkerConn(settings())
+    action = approved_action()
+    wire_run(monkeypatch, conn, [action])
+
+    def block(_conn, batch, result, *, now, correlation_key):
+        worker.block_live_actions(
+            _conn, batch, result, now=now, correlation_key=correlation_key,
+            error="NATIVE_OPTIMIZATION_CONFLICT: keep Amazon control",
+        )
+        return []
+
+    monkeypatch.setattr(worker, "validate_native_control_batch", block)
+    monkeypatch.setattr(worker, "load_ads_client", lambda *_args: pytest.fail("native conflict must block before credentials"))
+    result = worker.run_once("T1", live_ads=True)
+    assert (result.applied, result.failed) == (0, 1)
+    assert "NATIVE_OPTIMIZATION_CONFLICT" in (action.error or "")
