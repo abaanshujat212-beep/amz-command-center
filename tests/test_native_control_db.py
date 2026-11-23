@@ -18,7 +18,7 @@ def test_native_control_snapshots_are_idempotent_append_only_and_tenant_scoped()
             tenant_id,campaign_id,bidding_strategy,bidding_strategy_supported,
             source_observed_at,source_api_version,source_fingerprint,source_record)
             values(%s,'campaign-1','fixed',true,'2026-11-23T10:00:00Z','sp-campaigns-v3',%s,'{}')
-            on conflict(tenant_id,campaign_id,source_api_version,source_fingerprint) do nothing"""
+            on conflict(tenant_id,campaign_id,source_api_version,source_fingerprint,source_observed_at) do nothing"""
         db.execute(sql, (tenant_a, fingerprint))
         db.execute(sql, (tenant_a, fingerprint))
         db.execute(sql, (tenant_b, fingerprint))

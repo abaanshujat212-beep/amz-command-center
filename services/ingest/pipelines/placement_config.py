@@ -57,26 +57,28 @@ def extract_native_control_row(campaign: dict, *, observed_at: dt.datetime) -> d
     raw_strategy = str(dynamic.get("strategy") or campaign.get("biddingStrategy") or "unknown")
     strategy_key = raw_strategy.replace("-", "_").replace(" ", "_").lower()
     strategy = STRATEGIES.get(strategy_key.replace("_", ""), STRATEGIES.get(strategy_key, raw_strategy or "unknown"))
-    source_time = campaign.get("lastUpdatedDateTime") or campaign.get("lastUpdatedDate")
-    if source_time:
-        parsed = dt.datetime.fromisoformat(str(source_time).replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt.timezone.utc)
-    else:
-        parsed = observed_at
+    if observed_at.tzinfo is None:
+        raise ValueError("observed_at must include a timezone")
+    # Freshness is the successful read time, not the campaign modification time.
+    parsed = observed_at
     return {
         "campaign_id": campaign_id,
         "bidding_strategy": strategy,
         "bidding_strategy_supported": strategy in set(STRATEGIES.values()),
-        "budget_rule_active": bool(campaign.get("budgetRuleActive") or campaign.get("budgetRules")),
-        "schedule_rule_active": bool(campaign.get("scheduleRuleActive") or campaign.get("scheduleRules")),
-        "rule_based_bidding_active": bool(campaign.get("biddingRuleActive") or campaign.get("biddingRules")),
-        "cost_control_active": bool(campaign.get("costControl") or dynamic.get("costControl")),
+        "budget_rule_active": control_flag(campaign.get("budgetRuleActive")),
+        "schedule_rule_active": control_flag(campaign.get("scheduleRuleActive")),
+        "rule_based_bidding_active": control_flag(campaign.get("biddingRuleActive")),
+        "cost_control_active": control_flag(campaign.get("costControl", dynamic.get("costControl"))),
         "source_observed_at": parsed,
         "source_api_version": API_VERSION,
         "source_fingerprint": hashlib.sha256(json.dumps(campaign, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest(),
         "source_record": campaign,
     }
+
+
+def control_flag(value) -> bool | None:
+    # Missing, string and object values cannot prove a control is inactive.
+    return value if type(value) is bool else None
 
 
 def upsert_rows(conn, tenant_id: str, rows: list[dict]) -> int:
@@ -104,7 +106,7 @@ def insert_native_control_rows(conn, tenant_id: str, rows: list[dict]) -> int:
               cost_control_active, source_observed_at, source_api_version,
               source_fingerprint, source_record
             ) values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            on conflict (tenant_id, campaign_id, source_api_version, source_fingerprint) do nothing
+            on conflict (tenant_id, campaign_id, source_api_version, source_fingerprint, source_observed_at) do nothing
             returning id
             """,
             (tenant_id, row["campaign_id"], row["bidding_strategy"], row["bidding_strategy_supported"], row["budget_rule_active"], row["schedule_rule_active"], row["rule_based_bidding_active"], row["cost_control_active"], row["source_observed_at"], row["source_api_version"], row["source_fingerprint"], psycopg.types.json.Jsonb(row["source_record"])),

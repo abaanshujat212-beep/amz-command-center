@@ -28,8 +28,8 @@ def test_extract_native_control_preserves_supported_strategy_and_source_time():
     assert row is not None
     assert row["bidding_strategy"] == "dynamic_down_only"
     assert row["bidding_strategy_supported"] is True
-    assert row["budget_rule_active"] is True
-    assert row["source_observed_at"] == dt.datetime(2026,11,20,10,tzinfo=dt.timezone.utc)
+    assert row["budget_rule_active"] is None
+    assert row["source_observed_at"] == dt.datetime(2026,11,21,tzinfo=dt.timezone.utc)
     assert len(row["source_fingerprint"]) == 64
 
 

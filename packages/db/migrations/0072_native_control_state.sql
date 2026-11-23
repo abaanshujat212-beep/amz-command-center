@@ -5,16 +5,16 @@ create table campaign_native_control_state (
   campaign_id text not null check (btrim(campaign_id) <> ''),
   bidding_strategy text not null,
   bidding_strategy_supported boolean not null,
-  budget_rule_active boolean not null default false,
-  schedule_rule_active boolean not null default false,
-  rule_based_bidding_active boolean not null default false,
-  cost_control_active boolean not null default false,
+  budget_rule_active boolean,
+  schedule_rule_active boolean,
+  rule_based_bidding_active boolean,
+  cost_control_active boolean,
   source_observed_at timestamptz not null,
   source_api_version text not null check (btrim(source_api_version) <> ''),
   source_fingerprint text not null check (source_fingerprint ~ '^[0-9a-f]{64}$'),
   source_record jsonb not null check (jsonb_typeof(source_record) = 'object'),
   loaded_at timestamptz not null default now(),
-  unique (tenant_id, campaign_id, source_api_version, source_fingerprint)
+  unique (tenant_id, campaign_id, source_api_version, source_fingerprint, source_observed_at)
 );
 
 create index campaign_native_control_latest_idx

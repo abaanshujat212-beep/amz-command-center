@@ -41,6 +41,7 @@ export async function nativeControlApprovalConflict(client: PoolClient, actionId
   const placement=row.action_type==="set_placement_modifier";
   const budget=row.action_type==="set_budget";
   const campaignState=row.entity_type==="campaign"&&(row.action_type==="pause"||row.action_type==="enable");
+  if(((bid||placement)&&(row.rule_based_bidding_active==null||row.cost_control_active==null))||(budget&&row.budget_rule_active==null)||(campaignState&&row.schedule_rule_active==null)) return "NATIVE_CONTROL_EVIDENCE_MISSING: required native-control state is unknown.";
   const conflict=(bid&&(row.bidding_strategy!=="fixed"||row.rule_based_bidding_active||row.cost_control_active))||(placement&&(row.rule_based_bidding_active||row.cost_control_active))||(budget&&row.budget_rule_active)||(campaignState&&row.schedule_rule_active);
   return conflict ? "NATIVE_OPTIMIZATION_CONFLICT: keep Amazon control or create a separately approved control-transfer proposal." : null;
 }

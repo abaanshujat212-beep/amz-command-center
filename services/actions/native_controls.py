@@ -25,10 +25,10 @@ class NativeControlState:
     campaign_id: str
     bidding_strategy: str
     bidding_strategy_supported: bool
-    budget_rule_active: bool
-    schedule_rule_active: bool
-    rule_based_bidding_active: bool
-    cost_control_active: bool
+    budget_rule_active: bool | None
+    schedule_rule_active: bool | None
+    rule_based_bidding_active: bool | None
+    cost_control_active: bool | None
     source_observed_at: dt.datetime
     source_api_version: str
 
@@ -68,6 +68,15 @@ def evaluate_native_control(
     campaign_state_action = action.action_type in {"pause", "enable"} and action.entity_type == "campaign"
 
     conflicts: list[str] = []
+    required = []
+    if bid_action or placement_action:
+        required.extend([state.rule_based_bidding_active, state.cost_control_active])
+    if budget_action:
+        required.append(state.budget_rule_active)
+    if campaign_state_action:
+        required.append(state.schedule_rule_active)
+    if any(value is None for value in required):
+        return NativeControlDecision(False, "NATIVE_CONTROL_EVIDENCE_MISSING", "Required native-control state is unknown.")
     if bid_action and (state.bidding_strategy != "fixed" or state.rule_based_bidding_active or state.cost_control_active):
         conflicts.append("Amazon-native bid optimization")
     if placement_action and (state.rule_based_bidding_active or state.cost_control_active):
@@ -93,10 +102,10 @@ def _state(row: dict[str, Any] | None) -> NativeControlState | None:
         campaign_id=str(row["campaign_id"]),
         bidding_strategy=str(row["bidding_strategy"]),
         bidding_strategy_supported=bool(row["bidding_strategy_supported"]),
-        budget_rule_active=bool(row["budget_rule_active"]),
-        schedule_rule_active=bool(row["schedule_rule_active"]),
-        rule_based_bidding_active=bool(row["rule_based_bidding_active"]),
-        cost_control_active=bool(row["cost_control_active"]),
+        budget_rule_active=row["budget_rule_active"],
+        schedule_rule_active=row["schedule_rule_active"],
+        rule_based_bidding_active=row["rule_based_bidding_active"],
+        cost_control_active=row["cost_control_active"],
         source_observed_at=row["source_observed_at"],
         source_api_version=str(row["source_api_version"]),
     )
