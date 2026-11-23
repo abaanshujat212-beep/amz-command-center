@@ -1,49 +1,18 @@
-# SP-API sandbox setup
+# SP-API sandbox Sales & Traffic smoke
 
-Use this flow when SP-API sandbox access is available and you want the app to fetch sandbox data for the single local tenant.
+This is a UK, one-day Reports API test. Configure a disposable **local** PostgreSQL database with a different name from the normal pipeline database. Run the existing migrations and seed a throwaway tenant there. Do not run this against production or reuse live credentials.
 
-## 1. Fill local keys only
+Supply dedicated sandbox-only values through your local secret/environment configuration (never commit these):
 
-Copy `.env.example` to `.env` and fill these values locally. Do not commit `.env`.
+- `SPAPI_SANDBOX_DATABASE_URL`: loopback connection for the disposable database. Do not set `DATABASE_URL` to the same database when running the smoke.
+- `SPAPI_SANDBOX_CLIENT_ID`, `SPAPI_SANDBOX_CLIENT_SECRET`, `SPAPI_SANDBOX_REFRESH_TOKEN`: approved sandbox credentials. There is no credential fallback to the live pipeline or its vault.
 
-```bash
-SPAPI_CLIENT_ID=...
-SPAPI_CLIENT_SECRET=...
-SPAPI_REFRESH_TOKEN=...
-SPAPI_REGION=eu
-SPAPI_ENDPOINT=https://sandbox.sellingpartnerapi-eu.amazon.com
-SPAPI_SELLER_ACCOUNT_ID=sandbox
-MARKETPLACE_ID=A1F83G8C2ARO7P
-DEV_TENANT_SLUG=dev
-KEK_BASE64=...
-KEK_VERSION=1
-```
-
-For the current local setup, the default tenant slug is `dev`, so you only need to put the keys in `.env` unless you intentionally seeded a different tenant.
-
-## 2. Start local stack and seed tenant
+Run the isolated smoke with the disposable tenant UUID:
 
 ```bash
-make up
-python -m packages.db.migrate up
-python -m packages.db.seed --name "Dev Tenant" --slug dev
-python -m packages.db.seed_spapi_sandbox
+python -m services.ingest.pipelines.sales_traffic --tenant-id <disposable-tenant-uuid> --sandbox
 ```
 
-The sandbox seed command encrypts `SPAPI_REFRESH_TOKEN` before storing it in `amazon_connection`.
+The runner uses only the official EU sandbox endpoint and the UK marketplace (`A1F83G8C2ARO7P`). It requests yesterday's `DAY` / `CHILD` Sales & Traffic report, or the day before `--today YYYY-MM-DD`. Nonempty, unique ASIN/day rows are required: an empty, unsupported or incompatible sandbox response is a blocker, not a success. The runner exercises normal raw upserts twice to verify duplicate-free replay, then rolls back. It never advances the regular watermark, records production freshness or persists sandbox token changes. Do not save or share credential values, signed URLs or raw report bodies.
 
-## 3. Run Sales & Traffic sandbox smoke
-
-```bash
-python -m services.ingest.pipelines.sales_traffic --tenant-id $(python - <<'PY'
-from packages.db.seed import tenant_id_for
-print(tenant_id_for('dev'))
-PY
-) --sandbox
-```
-
-If the sandbox reports API returns a limited or synthetic payload, paste the exact response/error on issue #94.
-
-## 4. Keep Ads deferred
-
-This setup is only for SP-API sandbox reads. Ads API testing and Ads write-back stay deferred until the SP-API sandbox flow is proven.
+On success the command prints only the date, market, row count and replay/rollback result. On failure it exits nonzero with the safe diagnostic. Record the observed result in #94 and note whether the sandbox could supply a suitable one-day payload. Sandbox output does not prove production Ads consent, production report coverage, or KPI reconciliation.

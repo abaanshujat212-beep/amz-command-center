@@ -24,6 +24,7 @@ REINGEST_DAYS = 14
 DATASET = "sales_traffic_asin_daily"
 RAW_TABLE = "raw_sales_traffic_asin_daily"
 REPORT_OPTIONS = {"dateGranularity": "DAY", "asinGranularity": "CHILD"}
+SANDBOX_ENDPOINT = "https://sandbox.sellingpartnerapi-eu.amazon.com"
 
 
 @dataclass(frozen=True)
@@ -264,15 +265,19 @@ def run_requests(conn, tenant_id: str, client: SalesTrafficClient, requests: Ite
 def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, client_factory: Callable[[SpConnection], SalesTrafficClient] | None = None) -> RunResult:
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
         dates = plan_dates(read_watermark(conn, tenant_id), today=today)
+        if dry_run:
+            # A plan cannot stand in for completed data or repair a freshness gap.
+            return RunResult(tenant_id=tenant_id, dry_run=True, requested=len(dates))
+        if client_factory is None and (os.environ.get("SPAPI_ENDPOINT") or "").rstrip("/") == SANDBOX_ENDPOINT:
+            raise RuntimeError("Use --sandbox for the read-only SP-API sandbox smoke")
         run_id = start_pipeline_run(conn, tenant_id, dates)
-        sp_connection = None if dry_run and client_factory is None else load_sp_connection(conn, tenant_id)
-        client = (client_factory or _default_client)(sp_connection) if sp_connection else _DryClient()
-        result = run_requests(conn, tenant_id, client, [ReportRequest(d) for d in dates], dry_run=dry_run)
+        sp_connection = load_sp_connection(conn, tenant_id)
+        client = (client_factory or _default_client)(sp_connection)
+        result = run_requests(conn, tenant_id, client, [ReportRequest(d) for d in dates], dry_run=False)
         finish_pipeline_run(conn, run_id, result)
         if result.failed == 0:
             update_watermark(conn, tenant_id, dates)
-        if sp_connection is not None:
-            persist_rotated_refresh_token(conn, sp_connection, client)
+        persist_rotated_refresh_token(conn, sp_connection, client)
         conn.commit()
         return result
 
@@ -281,31 +286,25 @@ def _default_client(connection: SpConnection) -> SpApiClient:
     return SpApiClient(SpApiCredentials(connection.client_id, connection.client_secret, connection.refresh_token), tenant_id=None, region=connection.region)
 
 
-class _DryClient:
-    def create_report(self, report_type, start, end, report_options=None):
-        return f"dry-{report_type}-{start}"
-    def wait_for_report(self, report_id: str, timeout_s: int = 3600) -> str:
-        return f"document-{report_id}"
-    def download_report(self, document_id: str) -> bytes:
-        return b'{"salesAndTrafficByAsin": []}'
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run SP-API Sales & Traffic ingestion")
     parser.add_argument("--tenant-id", default=os.environ.get("DEV_TENANT_ID"))
     parser.add_argument("--live", action="store_true", help="Call the configured SP-API endpoint")
-    parser.add_argument("--sandbox", action="store_true", help="Call SP-API sandbox endpoint from SPAPI_ENDPOINT")
+    parser.add_argument("--sandbox", action="store_true", help="Smoke-test one day in the isolated EU sandbox")
     parser.add_argument("--today", help="Override today's date as YYYY-MM-DD for smoke testing")
     args = parser.parse_args()
     if not args.tenant_id:
         raise SystemExit("--tenant-id or DEV_TENANT_ID is required")
     if args.live and args.sandbox:
         raise SystemExit("choose only one of --live or --sandbox")
-    if args.sandbox:
-        os.environ.setdefault("SPAPI_ENDPOINT", "https://sandbox.sellingpartnerapi-eu.amazon.com")
     today = dt.date.fromisoformat(args.today) if args.today else None
-    result = run(args.tenant_id, dry_run=not (args.live or args.sandbox), today=today)
-    mode = "sandbox" if args.sandbox else "live" if args.live else "dry-run"
+    if args.sandbox:
+        from services.ingest.pipelines.sales_traffic_sandbox import cli_smoke
+
+        cli_smoke(args.tenant_id, (today or dt.date.today()) - dt.timedelta(days=1))
+        return
+    result = run(args.tenant_id, dry_run=not args.live, today=today)
+    mode = "live" if args.live else "dry-run"
     print(
         f"sales_traffic mode={mode} requested={result.requested} succeeded={result.succeeded} "
         f"failed={result.failed} rows_loaded={result.rows_loaded}"
