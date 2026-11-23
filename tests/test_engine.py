@@ -167,6 +167,18 @@ def tenant(conn):
     conn.commit()
 
 
+def _native_snapshot(cur, tenant, now, *, strategy="fixed"):
+    cur.execute(
+        """insert into campaign_native_control_state(
+               tenant_id,campaign_id,bidding_strategy,bidding_strategy_supported,
+               budget_rule_active,schedule_rule_active,rule_based_bidding_active,
+               cost_control_active,source_observed_at,source_api_version,source_fingerprint,
+               source_record)
+           values(%s,'C1',%s,true,false,false,false,false,%s,'fixture',repeat('a',64),'{}')""",
+        (tenant, strategy, now),
+    )
+
+
 def _through(now):
     # newest settled date, matching TenantGuardConfig.settlement_lag_days
     return now.date() - dt.timedelta(days=3)
@@ -213,6 +225,7 @@ def test_profitable_keyword_produces_exactly_one_pending_action(conn, tenant):
     through = _through(now)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant,))
+        _native_snapshot(cur, tenant, now)
         _rule_row(cur, tenant, "raise_bid_profitable")
         # ACOS 0.15 < break_even 0.30 * 0.7 = 0.21
         for day in range(1, 4):
@@ -291,6 +304,7 @@ def test_higher_priority_rule_claims_the_entity(conn, tenant):
     through = _through(now)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant,))
+        _native_snapshot(cur, tenant, now)
         # Same condition, different priority. Lower number runs first.
         _rule_row(cur, tenant, "raise_bid_profitable", priority=10)
         _rule_row(cur, tenant, "rescue_impression_starved", priority=99,
@@ -317,6 +331,7 @@ def test_run_summary_is_written_to_pipeline_run(conn, tenant):
     through = _through(now)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("select set_tenant(%s)", (tenant,))
+        _native_snapshot(cur, tenant, now)
         _rule_row(cur, tenant, "raise_bid_profitable")
         for day in range(1, 4):
             _keyword_day(cur, tenant, through, keyword_id="K_WINNER",
@@ -338,3 +353,30 @@ def test_run_summary_is_written_to_pipeline_run(conn, tenant):
     assert run["status"] == "success"
     assert run["rows_loaded"] == summary.proposed == 1
     assert run["detail"]["matched"] == 1
+
+def test_matched_bid_conflict_is_recorded_without_a_pending_action(conn, tenant):
+    now = dt.datetime.now(dt.timezone.utc)
+    through = _through(now)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("select set_tenant(%s)", (tenant,))
+        _native_snapshot(cur, tenant, now, strategy="dynamic_up_down")
+        _rule_row(cur, tenant, "raise_bid_profitable")
+        for day in range(1, 4):
+            _keyword_day(cur, tenant, through, keyword_id="K_WINNER", day=day, acos=0.15)
+    conn.commit()
+
+    summary = evaluate_tenant(conn, tenant, now=now, through=through)
+    assert summary.matched == 1
+    assert summary.proposed == 0
+    assert summary.blocked == {"NATIVE_OPTIMIZATION_CONFLICT": 1}
+    assert _actions(conn, tenant) == []
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute("select set_tenant(%s)", (tenant,))
+        row = cur.execute(
+            "select blocked_by, metrics_snapshot from rule_evaluation where tenant_id=%s",
+            (tenant,),
+        ).fetchone()
+    assert row["blocked_by"] == "NATIVE_OPTIMIZATION_CONFLICT"
+    assert row["metrics_snapshot"]["native_control"]["ownership_options"] == [
+        "keep_amazon_control", "propose_separate_control_transfer",
+    ]
