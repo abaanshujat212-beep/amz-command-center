@@ -73,6 +73,16 @@ GUARD_EXPLANATIONS: dict[str, str] = {
     "destinations; an operator must resolve the routing before it is promoted.",
     "UNSUPPORTED_ACTION": "This action type or target is not implemented for safe live execution, "
     "so no change is sent to Amazon.",
+    "NATIVE_CONTROL_EVIDENCE_MISSING": "Amazon's control settings are unknown for this campaign. "
+    "Refresh and verify its native control settings before proposing a change.",
+    "NATIVE_CONTROL_EVIDENCE_INVALID": "Amazon's control snapshot has an invalid timestamp. "
+    "Refresh the snapshot and check the source clock before proposing a change.",
+    "NATIVE_CONTROL_EVIDENCE_STALE": "Amazon's control snapshot is more than 24 hours old. "
+    "Refresh it to confirm who controls the campaign now.",
+    "NATIVE_CONTROL_UNSUPPORTED": "The current Amazon bidding strategy is not supported by "
+    "this guard. Leave Amazon in control until the strategy can be verified safely.",
+    "NATIVE_OPTIMIZATION_CONFLICT": "An active Amazon control overlaps this proposed change. "
+    "Keep Amazon in control or request a separate, explicitly approved transfer to AXATY.",
 }
 
 
