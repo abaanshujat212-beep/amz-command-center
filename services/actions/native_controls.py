@@ -125,12 +125,14 @@ def load_native_control_state(cur, action: sm.Action) -> NativeControlState | No
           left join lateral (
             select n.* from campaign_native_control_state n
              where n.tenant_id = a.tenant_id
-               and n.campaign_id = coalesce(
+               and n.campaign_id = case when a.action_type = 'create_keyword'
+                 then nullif(a.after_value->'destination'->>'campaign_id','')
+                 else coalesce(
                  nullif(a.after_value->>'campaign_id',''),
                  nullif(a.before_value->>'campaign_id',''),
                  nullif(e.metrics_snapshot->>'campaign_id',''),
                  case when a.entity_type = 'campaign' then a.entity_id end
-               )
+               ) end
              order by n.source_observed_at desc, n.loaded_at desc limit 1
           ) s on true
          where a.tenant_id = %s and a.id = %s

@@ -24,11 +24,11 @@ const guarded = new Set([
 export async function nativeControlApprovalConflict(client: PoolClient, actionId: string): Promise<string | null> {
   const rows = await query<NativeControlApprovalRow>(client, `
     select a.action_type,a.entity_type,
-      coalesce(nullif(a.after_value->>'campaign_id',''),nullif(a.before_value->>'campaign_id',''),nullif(e.metrics_snapshot->>'campaign_id',''),case when a.entity_type='campaign' then a.entity_id end) campaign_id,
+      case when a.action_type='create_keyword' then nullif(a.after_value->'destination'->>'campaign_id','') else coalesce(nullif(a.after_value->>'campaign_id',''),nullif(a.before_value->>'campaign_id',''),nullif(e.metrics_snapshot->>'campaign_id',''),case when a.entity_type='campaign' then a.entity_id end) end campaign_id,
       n.bidding_strategy,n.bidding_strategy_supported,n.budget_rule_active,n.schedule_rule_active,
       n.rule_based_bidding_active,n.cost_control_active,n.source_observed_at::text
     from action a left join rule_evaluation e on e.tenant_id=a.tenant_id and e.id=a.evaluation_id
-    left join lateral(select s.* from campaign_native_control_state s where s.tenant_id=a.tenant_id and s.campaign_id=coalesce(nullif(a.after_value->>'campaign_id',''),nullif(a.before_value->>'campaign_id',''),nullif(e.metrics_snapshot->>'campaign_id',''),case when a.entity_type='campaign' then a.entity_id end) order by s.source_observed_at desc,s.loaded_at desc limit 1)n on true
+    left join lateral(select s.* from campaign_native_control_state s where s.tenant_id=a.tenant_id and s.campaign_id=case when a.action_type='create_keyword' then nullif(a.after_value->'destination'->>'campaign_id','') else coalesce(nullif(a.after_value->>'campaign_id',''),nullif(a.before_value->>'campaign_id',''),nullif(e.metrics_snapshot->>'campaign_id',''),case when a.entity_type='campaign' then a.entity_id end) end order by s.source_observed_at desc,s.loaded_at desc limit 1)n on true
     where a.id=$1`, [actionId]);
   const row=rows[0];
   if(!row||!guarded.has(`${row.entity_type}:${row.action_type}`)) return null;
@@ -36,7 +36,7 @@ export async function nativeControlApprovalConflict(client: PoolClient, actionId
   const observed=Date.parse(row.source_observed_at);
   if(!Number.isFinite(observed)||observed>Date.now()+5*60*1000) return "NATIVE_CONTROL_EVIDENCE_INVALID: campaign native-control timestamp is invalid.";
   if(Date.now()-observed>24*60*60*1000) return "NATIVE_CONTROL_EVIDENCE_STALE: refresh campaign native-control state before approval.";
-  if(!row.bidding_strategy_supported) return `NATIVE_CONTROL_UNSUPPORTED: strategy ${row.bidding_strategy??"unknown"} is not verified.`;
+  if(!row.bidding_strategy_supported||!["fixed","dynamic_down_only","dynamic_up_down"].includes(row.bidding_strategy??"")) return `NATIVE_CONTROL_UNSUPPORTED: strategy ${row.bidding_strategy??"unknown"} is not verified.`;
   const bid=row.action_type==="set_bid"||row.action_type==="create_keyword";
   const placement=row.action_type==="set_placement_modifier";
   const budget=row.action_type==="set_budget";
