@@ -15,7 +15,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
-from services.ingest.security.vault import unseal
+from services.ingest.security.vault import seal, unseal
 
 BACKFILL_DAYS = 95
 SETTLEMENT_LAG_DAYS = 3
@@ -61,9 +61,12 @@ class Window:
 class AdsConnection:
     region: str
     client_id: str
-    client_secret: str
-    refresh_token: str
+    client_secret: str = field(repr=False)
+    refresh_token: str = field(repr=False)
     profile_id: int | None
+    connection_id: uuid.UUID
+    original_ciphertext: bytes = field(repr=False)
+    original_key_version: int
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,7 @@ class RunResult:
     tenant_id: str
     dry_run: bool
     datasets: list[DatasetResult]
+    token_rotation: str = "unchanged"
 
     @property
     def succeeded(self) -> int:
@@ -212,7 +216,7 @@ def _run_status(result: DatasetResult) -> str:
 def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     row = conn.execute(
         """
-        select c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
+        select c.id, c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
           from amazon_connection c
           left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
          where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
@@ -229,7 +233,32 @@ def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     client_secret = os.environ.get("ADS_CLIENT_SECRET")
     if not client_id or not client_secret:
         raise RuntimeError("ADS_CLIENT_ID and ADS_CLIENT_SECRET must be set")
-    return AdsConnection(row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"]), row.get("key_version", 1)), row["profile_id"])
+    ciphertext = bytes(row["refresh_token_encrypted"])
+    version = row["key_version"]
+    return AdsConnection(
+        row["region"], client_id, client_secret, unseal(ciphertext, version), row["profile_id"],
+        row["id"], ciphertext, version,
+    )
+
+
+def persist_rotated_refresh_token(conn, tenant_id: str, connection: AdsConnection, client: AdsReportClient) -> str:
+    token = getattr(getattr(client, "credentials", None), "refresh_token", None)
+    if not isinstance(token, str) or not token or token == connection.refresh_token:
+        return "unchanged"
+    sealed = seal(token)
+    # Do not overwrite a reconnection, key rotation or refresh from another worker.
+    update = conn.execute(
+        """
+        update amazon_connection
+           set refresh_token_encrypted = %s, key_version = %s, last_refresh_at = now()
+         where tenant_id = %s and id = %s and provider = 'ads_api' and status = 'active'
+           and refresh_token_encrypted = %s and key_version = %s
+        """,
+        (sealed.ciphertext, sealed.key_version, tenant_id, connection.connection_id,
+         connection.original_ciphertext, connection.original_key_version),
+    )
+    return "persisted" if update.rowcount == 1 else "connection_changed"
+
 
 
 def read_watermark(conn, tenant_id: str, dataset: str) -> dt.date | None:
@@ -319,8 +348,9 @@ def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, d
             if result.failed == 0:
                 update_watermark(conn, tenant_id, dataset, [r.date for r in requests])
             results.append(result)
+        token_rotation = persist_rotated_refresh_token(conn, tenant_id, ads_connection, client)
         conn.commit()
-    return RunResult(tenant_id, dry_run, results)
+    return RunResult(tenant_id, False, results, token_rotation)
 
 
 def _default_client(connection: AdsConnection) -> AdsClient:
