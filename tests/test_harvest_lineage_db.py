@@ -115,6 +115,16 @@ def test_harvest_routes_dedupes_records_lineage_and_isolates_tenants():
                 (tenant_a, tenant_a),
             )
             _route(admin, tenant_a, "generic_exact")
+            admin.execute(
+                """insert into campaign_native_control_state(
+                       tenant_id,campaign_id,bidding_strategy,bidding_strategy_supported,
+                       budget_rule_active,schedule_rule_active,rule_based_bidding_active,
+                       cost_control_active,source_observed_at,source_api_version,
+                       source_fingerprint,source_record)
+                   values(%s,'C-EXACT','fixed',true,false,false,false,false,
+                          now(),'fixture',repeat('a',64),'{}')""",
+                (tenant_a,),
+            )
             _route(admin, tenant_a, "conquest_a", funnel="conquest", ad_group="G-CONQ-A")
             _route(admin, tenant_a, "conquest_b", funnel="conquest", ad_group="G-CONQ-B")
             _term(admin, tenant_a, "hook and loop tape", orders=4)
