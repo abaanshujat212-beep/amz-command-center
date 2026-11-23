@@ -29,6 +29,7 @@ export default async function Recommendations({ searchParams }: { searchParams: 
 	const {recommendations, pagination} = result
 	return <div className="space-y-5">
 		<div><h1 className="text-lg font-semibold">Recommendation Center</h1><p className="mt-1 text-sm text-slate-600">Review grounded proposals, their expected effect, and operator risk before using the existing approval workflow.</p></div>
+		<Link href="/recommendations/blocked" className="inline-flex rounded border border-slate-300 px-3 py-2 text-sm">View blocked evaluations</Link>
 		<form method="get" className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-5">
 			<Filter name="type" title="Type" values={TYPES} selected={params.get("type")} />
 			<Filter name="status" title="Status" values={STATUSES} selected={params.get("status")} />
