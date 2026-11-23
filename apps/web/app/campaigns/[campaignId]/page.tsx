@@ -16,6 +16,7 @@ import {
 } from "@/lib/queries-drilldown"
 import { ALLOWED_WINDOWS, parseDays, windowHref, type Window } from "@/lib/range"
 import { currentTenantId } from "@/lib/session"
+import { BiddingControlPanel } from "./bidding-control"
 
 export const dynamic = "force-dynamic"
 
@@ -143,6 +144,8 @@ export default async function CampaignDetail({
 					{header.data_through && ` \u00b7 through ${reportDate(header.data_through)}`}
 				</div>
 			</div>
+
+			<BiddingControlPanel campaignId={campaignId} />
 
 			<div className="grid grid-cols-2 gap-3 md:grid-cols-5">
 				<Kpi label="Spend" value={money(header.cost)} />
