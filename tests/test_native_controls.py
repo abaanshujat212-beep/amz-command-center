@@ -38,3 +38,10 @@ def test_unrelated_negative_action_does_not_require_native_control_evidence():
 
 def test_keyword_harvest_is_blocked_by_native_bid_ownership():
     assert evaluate_native_control(action("create_keyword","search_term"),state(bidding_strategy="dynamic_down_only"),now=NOW).reason_code=="NATIVE_OPTIMIZATION_CONFLICT"
+
+def test_unknown_required_controls_block_but_unrelated_unknown_does_not():
+    for field in ("rule_based_bidding_active", "cost_control_active"):
+        assert evaluate_native_control(action(), state(**{field: None}), now=NOW).allowed is False
+    assert evaluate_native_control(action("set_budget", "campaign"), state(budget_rule_active=None), now=NOW).allowed is False
+    assert evaluate_native_control(action("pause", "campaign"), state(schedule_rule_active=None), now=NOW).allowed is False
+    assert evaluate_native_control(action(), state(budget_rule_active=None), now=NOW).allowed is True

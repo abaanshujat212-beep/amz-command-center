@@ -23,6 +23,21 @@ def test_extract_placement_rows_skips_campaign_without_id():
     assert extract_placement_rows({"dynamicBidding": {}}) == []
 
 
+def test_repeated_read_renews_observation_without_changing_payload_fingerprint():
+    payload = {"campaignId": "c1", "lastUpdatedDateTime": "2020-01-01T00:00:00Z", "dynamicBidding": {"strategy": "manual"}}
+    first = extract_native_control_row(payload, observed_at=dt.datetime(2026, 11, 22, tzinfo=dt.timezone.utc))
+    second = extract_native_control_row(payload, observed_at=dt.datetime(2026, 11, 23, tzinfo=dt.timezone.utc))
+    assert first["source_fingerprint"] == second["source_fingerprint"]
+    assert first["source_observed_at"] < second["source_observed_at"]
+    assert second["cost_control_active"] is None
+
+
+def test_only_boolean_control_fields_prove_active_or_inactive():
+    for value, expected in [(False, False), (True, True), ("false", None), ({}, None), (None, None)]:
+        row = extract_native_control_row({"campaignId": "c1", "budgetRuleActive": value}, observed_at=dt.datetime.now(dt.timezone.utc))
+        assert row["budget_rule_active"] is expected
+
+
 def test_extract_native_control_preserves_supported_strategy_and_source_time():
     row = extract_native_control_row({"campaignId":"c1","lastUpdatedDateTime":"2026-11-20T10:00:00Z","dynamicBidding":{"strategy":"legacyForSales"},"budgetRules":[{"id":"r1"}]}, observed_at=dt.datetime(2026,11,21,tzinfo=dt.timezone.utc))
     assert row is not None
