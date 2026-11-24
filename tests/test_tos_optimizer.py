@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal as D
 
 from services.rules.tos_optimizer import (
+    AudienceBoostSnapshot,
     TopOfSearchEvidence,
     TopOfSearchPolicy,
     plan_top_of_search,
@@ -28,7 +29,9 @@ POLICY = TopOfSearchPolicy(
     20,
     3,
     2 * DAY,
+    D("2.00"),
 )
+AUDIENCE = AudienceBoostSnapshot("tenant", "profile", "c", "GB", "GBP", "fixed", NOW, "rev-1", True, ())
 EVIDENCE = TopOfSearchEvidence(
     "tenant",
     "profile",
@@ -55,6 +58,7 @@ EVIDENCE = TopOfSearchEvidence(
     D("15"),
     True,
     NOW - DAY,
+    AUDIENCE,
 )
 
 
@@ -151,6 +155,7 @@ class TestTopOfSearch(unittest.TestCase):
         rows = review_top_of_search(
             plan(),
             now=NOW,
+            current_audience_snapshot=AUDIENCE,
             objective_snapshot={"code": "STRATEGIC_VISIBILITY"},
             strategy_snapshot={"code": "TOP_OF_SEARCH"},
         )
@@ -165,3 +170,72 @@ class TestTopOfSearch(unittest.TestCase):
             assert behavior["requires_human_approval"]
             assert not behavior["executable"]
             assert not behavior["automation_enabled"]
+
+    def test_unknown_audience_or_non_fixed_bidding_fails_closed(self):
+        for snapshot in [
+            None,
+            replace(AUDIENCE, adjustments=None),
+            replace(AUDIENCE, complete=False),
+            replace(AUDIENCE, observed_at=NOW - 3 * DAY),
+            replace(AUDIENCE, campaign_id="wrong"),
+            replace(AUDIENCE, marketplace="US"),
+            replace(AUDIENCE, bidding_strategy="dynamic_up_down"),
+            replace(AUDIENCE, adjustments=(("dup", 20), ("dup", 60))),
+        ]:
+            result = plan(evidence=replace(EVIDENCE, audience_snapshot=snapshot))
+            assert not result.candidates
+            assert "audience_or_fixed_bid_evidence_unavailable" in result.blocked
+        assert plan().candidates  # explicit complete empty inventory
+        assert not plan(policy=replace(POLICY, max_effective_top_bid=None)).candidates
+
+    def test_combo_stress_uses_highest_audience_and_never_rounds_into_cap(self):
+        boosted = replace(AUDIENCE, adjustments=(("lower", 30), ("higher", 60)))
+        baseline = replace(
+            EVIDENCE, audience_snapshot=boosted, current_base_bid=D("1.00"),
+            current_modifier_pct=50, top_sales=D("400"), keyword_sales=D("500"),
+        )
+        result = plan(evidence=baseline)
+        assert not result.candidates
+        assert result.combined_top_bid == D("2.40")
+        assert "effective_top_bid_ceiling_reached" in result.blocked
+
+        # A placement-only +50% from zero would be £2.40; the planner may reduce it.
+        lower = plan(
+            policy=replace(POLICY, max_modifier_step_pct=100),
+            evidence=replace(baseline, current_modifier_pct=0),
+            bid=False,
+        )
+        assert len(lower.candidates) == 1
+        assert lower.candidates[0].after_value == D("25")
+        assert lower.combined_top_bid == D("2.00")
+
+        # £2.004 is not allowed through a £2.00 cap just because it rounds down.
+        almost = plan(evidence=replace(
+            baseline, current_modifier_pct=20,
+            audience_snapshot=replace(AUDIENCE, adjustments=(("only", 67),)),
+        ))
+        assert almost.combined_top_bid == D("2.004")
+        assert not almost.candidates
+
+    def test_changed_audience_even_at_same_max_requires_new_review(self):
+        original = replace(AUDIENCE, adjustments=(("original", 20),))
+        result = plan(evidence=replace(EVIDENCE, audience_snapshot=original))
+        assert result.candidates
+        params = {"objective_snapshot":{}, "strategy_snapshot":{}}
+        assert review_top_of_search(result, now=NOW, current_audience_snapshot=original, **params)
+        changed = replace(original, adjustments=(("different", 20),))
+        assert not review_top_of_search(result, now=NOW, current_audience_snapshot=changed, **params)
+        assert not review_top_of_search(result, now=NOW+3*DAY, current_audience_snapshot=original, **params)
+
+    def test_other_placement_stress_multiplies_audience_factor(self):
+        boosted = replace(AUDIENCE, adjustments=(("only", 60),))
+        result = plan(
+            evidence=replace(
+                EVIDENCE, audience_snapshot=boosted, peak_daily_campaign_spend=D("19.45"),
+                other_max_modifier_pct=240, top_sales=D("200"), keyword_sales=D("250"),
+            ),
+            placement=False,
+        )
+        assert len(result.candidates) == 1
+        assert result.candidates[0].after_value == D(".51")
+        assert result.estimated_incremental_daily_spend == D(".544")
