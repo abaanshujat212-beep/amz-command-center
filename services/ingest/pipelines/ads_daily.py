@@ -15,7 +15,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from services.ingest.clients.ads_api import AdsClient, AdsCredentials
-from services.ingest.security.vault import unseal
+from services.ingest.security.vault import seal, unseal
 
 BACKFILL_DAYS = 95
 SETTLEMENT_LAG_DAYS = 3
@@ -61,9 +61,12 @@ class Window:
 class AdsConnection:
     region: str
     client_id: str
-    client_secret: str
-    refresh_token: str
+    client_secret: str = field(repr=False)
+    refresh_token: str = field(repr=False)
     profile_id: int | None
+    connection_id: uuid.UUID
+    original_ciphertext: bytes = field(repr=False)
+    original_key_version: int
 
 
 @dataclass(frozen=True)
@@ -89,6 +92,7 @@ class RunResult:
     tenant_id: str
     dry_run: bool
     datasets: list[DatasetResult]
+    token_rotation: str = "unchanged"
 
     @property
     def succeeded(self) -> int:
@@ -212,7 +216,7 @@ def _run_status(result: DatasetResult) -> str:
 def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     row = conn.execute(
         """
-        select c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
+        select c.id, c.region, c.refresh_token_encrypted, c.key_version, p.profile_id
           from amazon_connection c
           left join ads_profile p on p.connection_id = c.id and p.tenant_id = c.tenant_id
          where c.tenant_id = %s and c.provider = 'ads_api' and c.status = 'active'
@@ -229,7 +233,32 @@ def load_ads_connection(conn, tenant_id: str) -> AdsConnection:
     client_secret = os.environ.get("ADS_CLIENT_SECRET")
     if not client_id or not client_secret:
         raise RuntimeError("ADS_CLIENT_ID and ADS_CLIENT_SECRET must be set")
-    return AdsConnection(row["region"], client_id, client_secret, unseal(bytes(row["refresh_token_encrypted"]), row.get("key_version", 1)), row["profile_id"])
+    ciphertext = bytes(row["refresh_token_encrypted"])
+    version = row["key_version"]
+    return AdsConnection(
+        row["region"], client_id, client_secret, unseal(ciphertext, version), row["profile_id"],
+        row["id"], ciphertext, version,
+    )
+
+
+def persist_rotated_refresh_token(conn, tenant_id: str, connection: AdsConnection, client: AdsReportClient) -> str:
+    token = getattr(getattr(client, "credentials", None), "refresh_token", None)
+    if not isinstance(token, str) or not token or token == connection.refresh_token:
+        return "unchanged"
+    sealed = seal(token)
+    # Do not overwrite a reconnection, key rotation or refresh from another worker.
+    update = conn.execute(
+        """
+        update amazon_connection
+           set refresh_token_encrypted = %s, key_version = %s, last_refresh_at = now()
+         where tenant_id = %s and id = %s and provider = 'ads_api' and status = 'active'
+           and refresh_token_encrypted = %s and key_version = %s
+        """,
+        (sealed.ciphertext, sealed.key_version, tenant_id, connection.connection_id,
+         connection.original_ciphertext, connection.original_key_version),
+    )
+    return "persisted" if update.rowcount == 1 else "connection_changed"
+
 
 
 def read_watermark(conn, tenant_id: str, dataset: str) -> dt.date | None:
@@ -276,7 +305,6 @@ def run_requests(conn, tenant_id: str, client: AdsReportClient, requests: Iterab
     dataset = requests[0].dataset if requests else "unknown"
     result = DatasetResult(dataset=dataset, requested=len(requests))
     if dry_run:
-        result.succeeded = len(requests)
         return result
     for req in requests:
         report_id: str | None = None
@@ -304,29 +332,26 @@ def run(tenant_id: str, dry_run: bool = True, *, today: dt.date | None = None, d
         raise ValueError(f"unknown Ads dataset(s): {unknown}")
     results: list[DatasetResult] = []
     with psycopg.connect(DATABASE_URL, row_factory=dict_row) as conn:
-        ads_connection = None if dry_run and client_factory is None else load_ads_connection(conn, tenant_id)
-        client = (client_factory or _default_client)(ads_connection) if ads_connection else _DryClient()
+        if dry_run:
+            for dataset in selected:
+                requests = requests_for_dataset(dataset, read_watermark(conn, tenant_id, dataset), today=today)
+                results.append(DatasetResult(dataset=dataset, requested=len(requests)))
+            return RunResult(tenant_id, True, results)
+        ads_connection = load_ads_connection(conn, tenant_id)
+        client = (client_factory or _default_client)(ads_connection)
         for dataset in selected:
             requests = requests_for_dataset(dataset, read_watermark(conn, tenant_id, dataset), today=today)
             run_id = start_pipeline_run(conn, tenant_id, dataset, [r.date for r in requests])
-            result = run_requests(conn, tenant_id, client, requests, dry_run=dry_run)
+            result = run_requests(conn, tenant_id, client, requests, dry_run=False)
             result.dataset = dataset
             finish_pipeline_run(conn, run_id, result)
             if result.failed == 0:
                 update_watermark(conn, tenant_id, dataset, [r.date for r in requests])
             results.append(result)
+        token_rotation = persist_rotated_refresh_token(conn, tenant_id, ads_connection, client)
         conn.commit()
-    return RunResult(tenant_id, dry_run, results)
+    return RunResult(tenant_id, False, results, token_rotation)
 
 
 def _default_client(connection: AdsConnection) -> AdsClient:
     return AdsClient(AdsCredentials(connection.client_id, connection.client_secret, connection.refresh_token, connection.profile_id), tenant_id=None, region=connection.region)
-
-
-class _DryClient:
-    def create_report(self, report_kind, start_date, end_date, group_by=()):
-        return f"dry-{report_kind}-{start_date}"
-    def wait_for_report(self, report_id: str, timeout_s: int = 1800) -> str:
-        return f"dry://{report_id}"
-    def download_report(self, url: str) -> bytes:
-        return b"[]"

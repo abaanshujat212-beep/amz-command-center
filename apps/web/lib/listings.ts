@@ -88,3 +88,46 @@ export async function reviewListingDraft(client:PoolClient,tenantId:string,userI
 	await query(client,"insert into listing_review_event(tenant_id,project_id,draft_version_id,decision,comment,actor_user_id) values($1,$2,$3,$4,$5,$6)",[tenantId,projectId,raw.draftVersionId,raw.decision,typeof raw.comment === "string" ? raw.comment : null,userId])
 	await query(client,"update listing_project set review_state=$1,updated_at=now() where tenant_id=$2 and id=$3",[targets[raw.decision],tenantId,projectId])
 }
+
+type PreviewProject = QueryResultRow & {
+	id: string; name: string; asin: string | null; sku: string | null; marketplace: string; review_state: string
+}
+type PreviewVersion = QueryResultRow & { id: string; version: number; title: string; origin: string; created_at: string }
+type PreviewDraft = PreviewVersion & { bullets: unknown; description: string; backend_terms: unknown; change_summary: string }
+type PreviewValidation = QueryResultRow & {
+	id: string; passed: boolean; created_at: string; validator_version: string; product_type: string | null
+	ptd_contract_verified: boolean; restrictions_status: string
+}
+type PreviewIssue = QueryResultRow & { id: string; code: string; field: string; severity: string; message: string }
+type PreviewReview = QueryResultRow & {
+	id: string; version: number; decision: string; comment: string | null; created_at: string
+}
+
+// This read surface is separate from edit/review endpoints and deliberately
+// has no worker, provider call, action, or live Amazon status inference.
+export async function getListingProjectPreview(client: PoolClient, tenantId: string, projectId: string, requestedVersion: number | null) {
+	if (!UUID.test(projectId)) return null
+	const [project] = await query<PreviewProject>(client, `select id::text,name,asin,sku,marketplace,review_state
+		from listing_project where tenant_id=$1 and id=$2`, [tenantId,projectId])
+	if (!project) return null
+	const versionRows = await query<PreviewVersion>(client, `select id::text,version,title,origin,created_at::text
+		from listing_draft_version where tenant_id=$1 and project_id=$2 order by version desc limit 51`, [tenantId,projectId])
+	const [draft] = await query<PreviewDraft>(client, `select id::text,version,title,origin,created_at::text,bullets,description,backend_terms,change_summary
+		from listing_draft_version where tenant_id=$1 and project_id=$2 and ($3::int is null or version=$3)
+		order by version desc limit 1`, [tenantId,projectId,requestedVersion])
+	if (requestedVersion !== null && !draft) return null
+	const [validation] = draft ? await query<PreviewValidation>(client, `select id::text,passed,created_at::text,validator_version,
+			product_type,ptd_contract_verified,restrictions_status
+		from listing_validation_run where tenant_id=$1 and project_id=$2 and draft_version_id=$3
+		order by created_at desc,id desc limit 1`, [tenantId,projectId,draft.id]) : []
+	const issueRows = validation ? await query<PreviewIssue>(client, `select id::text,code,field,severity,message
+		from listing_validation_issue where tenant_id=$1 and validation_run_id=$2
+		order by case when severity='error' then 0 else 1 end,created_at,id limit 101`, [tenantId,validation.id]) : []
+	const reviewRows = await query<PreviewReview>(client, `select e.id::text,d.version,e.decision,e.comment,e.created_at::text
+		from listing_review_event e join listing_draft_version d
+			on d.tenant_id=e.tenant_id and d.project_id=e.project_id and d.id=e.draft_version_id
+		where e.tenant_id=$1 and e.project_id=$2 order by e.created_at desc,e.id desc limit 51`, [tenantId,projectId])
+	return {project, draft: draft ?? null, validation: validation ?? null, versions:versionRows.slice(0,50),
+		issues:issueRows.slice(0,100), reviews:reviewRows.slice(0,50), versionsLimited:versionRows.length>50,
+		issuesLimited:issueRows.length>100, reviewsLimited:reviewRows.length>50}
+}

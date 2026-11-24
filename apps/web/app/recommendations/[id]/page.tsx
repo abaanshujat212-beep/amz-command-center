@@ -1,3 +1,4 @@
+import { confidenceLabel } from "@/lib/recommendation-filters"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { approveAction, rejectAction } from "@/app/approvals/actions"
@@ -21,7 +22,7 @@ export default async function RecommendationDetail({ params }: { params: Promise
 	const pending = item.status === "pending"
 	return <div className="space-y-5">
 		<Link href="/recommendations" className="text-sm text-slate-600">← Recommendation Center</Link>
-		<div className="rounded-lg border border-slate-200 bg-white p-5"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs uppercase tracking-wide text-slate-500">{pretty(item.recommendation_type)}</p><h1 className="mt-1 text-xl font-semibold">{item.action_type}</h1><p className="mt-1 text-sm text-slate-600">{item.entity_type} · {item.entity_id}</p></div><div className="text-right text-sm"><p className="capitalize">{item.status} · {pretty(item.risk)} risk</p><p className="mt-1 text-slate-500">{Math.round((item.confidence ?? 0) * 100)}% confidence · {item.lookback_days ?? "—"} day lookback</p></div></div>
+		<div className="rounded-lg border border-slate-200 bg-white p-5"><div className="flex flex-wrap justify-between gap-4"><div><p className="text-xs uppercase tracking-wide text-slate-500">{pretty(item.recommendation_type)}</p><h1 className="mt-1 text-xl font-semibold">{item.action_type}</h1><p className="mt-1 text-sm text-slate-600">{item.entity_type} · {item.entity_id}</p></div><div className="text-right text-sm"><p className="capitalize">{item.status} · {pretty(item.risk)} risk</p><p className="mt-1 text-slate-500">{confidenceLabel(item.confidence)} · {item.lookback_days ?? "—"} day lookback</p></div></div>
 			<div className="mt-5 grid gap-3 md:grid-cols-2"><Panel title="Current value" content={json(item.before_value)} /><Panel title="Proposed value" content={json(item.after_value)} /></div>
 			<h2 className="mt-5 text-sm font-semibold">Why this is recommended</h2><p className="mt-1 text-sm text-slate-700">{item.reason_text ?? "No rationale was recorded."}</p>{item.clamped && <p className="mt-2 text-xs text-amber-700">Guardrail adjusted this proposal: {item.clamp_note ?? "limit applied"}</p>}
 		</div>

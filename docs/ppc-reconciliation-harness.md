@@ -33,7 +33,7 @@ make ppc-mart-export \
   EXPORT_FILE=.data/reconciliation/application.csv
 ```
 
-Normalize the corresponding Seller Central rows using the input contract above, preserving source file hashes separately in your evidence notes. Confirm campaign, placement, and account date coverage match the intended window before comparing totals. Missing source dates are not backfilled as zero.
+Normalize the corresponding Seller Central rows using the input contract above, preserving source file hashes separately in your evidence notes. A sign-off window requires settled campaign, placement and account evidence for every day in both exports. Each observed placement type must cover the same dates in both sources; it need not appear on days where neither source reports it. The report lists missing or mismatched coverage and returns `incomplete` even when numeric totals match. Missing source dates are not backfilled as zero; use a shorter fully evidenced window if an export omits quiet dates and no authoritative zero-activity evidence is available.
 
 Pass one `--definition METRIC=TEXT` for each of `spend`, `ad_sales`, `ad_orders`, `acos`, `tacos`, and `budget_amount`. Definitions are copied to the output as provenance; the tool does not interpret them.
 

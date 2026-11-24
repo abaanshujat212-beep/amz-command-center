@@ -6,7 +6,7 @@ export type DomainGroup = { label: string; links: readonly DomainLink[] }
 export const DOMAIN_GROUPS: readonly DomainGroup[] = [
 	{ label: "Home", links: [{ href: "/", label: "Command Center" }, { href: "/dashboard-studio", label: "Dashboard Studio" }] },
 	{ label: "Products", links: [{ href: "/research", label: "Product research" }, { href: "/suppliers", label: "Suppliers" }, { href: "/inventory", label: "Inventory" }, { href: "/listings", label: "Listing Studio" }, { href: "/opportunities", label: "Catalog opportunities" }, { href: "/sqp", label: "Search intelligence" }, { href: "/search-trends", label: "Market trends" }] },
-	{ label: "Decisions", links: [{ href: "/recommendations", label: "Recommendations" }, { href: "/approvals", label: "Approvals" }, { href: "/verification", label: "Verification" }, { href: "/history", label: "History" }] },
+	{ label: "Decisions", links: [{ href: "/recommendations", label: "Recommendations" }, { href: "/approvals", label: "Approvals" }, { href: "/verification", label: "Verification" }, { href: "/alerts", label: "Operator alerts" }, { href: "/history", label: "History" }] },
 	{ label: "Ads / PPC", links: [{ href: "/campaigns", label: "Campaigns" }, { href: "/budget-health", label: "Budget health" }, { href: "/budget-pacing", label: "Budget pacing" }, { href: "/budget-forecast", label: "Budget forecast" }, { href: "/scores", label: "Health & opportunity" }, { href: "/search-terms", label: "Search terms" }, { href: "/term-lifecycle", label: "Isolation & revive" }, { href: "/placements", label: "Placements" }] },
 	{ label: "Finance", links: [{ href: "/economics", label: "Economics" }, { href: "/reports", label: "Reports" }] },
 	{ label: "AI", links: [{ href: "/copilot", label: "Copilot" }] },
