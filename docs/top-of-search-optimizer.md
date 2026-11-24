@@ -57,3 +57,31 @@ caps and conflict/cooldown guards, and independently verify Amazon capability
 and marketplace support. External live tests require an authorized Ads profile;
 synthetic readiness never unlocks the worker. Profile configuration,
 scheduler, services, and production settings are untouched in this slice.
+
+## Offline audience-adjusted ceiling
+
+The planner requires an explicit effective Top-of-Search bid ceiling, separate
+from the base-bid cap. The current fixture supports only normalized fixed-bid
+Sponsored Products evidence in GB/GBP. This is not proof that a particular
+advertiser or Amazon API version supplies the evidence. Dynamic up/down,
+unsupported scope, missing, stale or incomplete audience inventory all block
+this estimate rather than assuming a zero boost. An explicitly complete empty
+audience inventory is the only empty case that implies no audience adjustment.
+
+If multiple adjustments are represented in a fixture, use only the highest
+possible audience increase, not the sum or product of audiences. Combine it
+with the selected placement factor, including for other-placement cost stress.
+Compare the unrounded combined exposure with the ceiling. For example, a £1.00
+bid with +50% Top-of-Search and +60% audience can reach £2.40, not £1.50. A £2.00
+cap must block that combination; a proposed placement increase can be reduced
+to +25% when the remaining policy and economic limits permit. Amazon currently
+documents different audience-selection limits outside the US and video boosts
+in the US; this fixture does not infer entitlement or model US video.
+
+Review serialization requires the same complete scoped snapshot, including its
+source revision and conditions, before its policy expiry. Changed or unavailable
+evidence must be replanned even if the largest numeric boost is unchanged.
+Existing native bid/placement permission checks remain in force. No account
+reads, approval/apply hooks, new data source, or Amazon writes are introduced.
+
+Source: [Amazon Sponsored Products bid adjustments](https://advertising.amazon.com/help/GYYZVM7LGSRYGWV5).
