@@ -374,3 +374,92 @@ def test_no_prompt_is_ever_stored(migration_sql):
 def test_the_month_is_defined_once_in_sql(migration_sql):
     assert "create or replace view v_llm_spend_this_month" in migration_sql
     assert "date_trunc('month', now())" in migration_sql
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), -1.0])
+def test_nonfinite_or_negative_budget_is_rejected(monkeypatch, value):
+    monkeypatch.setenv("LLM_MONTHLY_BUDGET", str(value))
+    with pytest.raises(gw.LlmError):
+        gw.Budget.from_env()
+    with pytest.raises(gw.LlmError):
+        gw.Budget(value)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -1.0])
+def test_invalid_spend_or_estimate_never_permits_call(monkeypatch, value):
+    monkeypatch.setattr(gw, "spend_this_month", lambda _: value)
+    with pytest.raises(gw.LlmError):
+        gw.check_budget("tenant", gw.Budget(25), 0.1)
+    monkeypatch.setattr(gw, "spend_this_month", lambda _: 0)
+    with pytest.raises(gw.LlmError):
+        gw.check_budget("tenant", gw.Budget(25), value)
+
+
+@pytest.mark.parametrize("header", ["nan", "inf", "-1"])
+def test_invalid_retry_after_uses_bounded_backoff(header):
+    assert gw.retry_delay(1, header) == 2
+
+
+def _mock_dispatch(monkeypatch, responses):
+    logged, sent = [], []
+    monkeypatch.setenv("LLM_FALLBACK_PROVIDERS", "")
+    monkeypatch.setattr(gw, "record", logged.append)
+    monkeypatch.setattr(gw, "spend_this_month", lambda _: 0)
+    monkeypatch.setattr(gw, "estimate_cost", lambda *args: 0.1)
+    monkeypatch.setattr(pv, "build_call", lambda *args: None)
+    monkeypatch.setattr(gw.time, "sleep", lambda _: None)
+    def send(call):
+        sent.append(call)
+        return responses.pop(0)
+    monkeypatch.setattr(gw, "_send", send)
+    return logged, sent
+
+
+def _successful_response():
+    return 200, {"model": "gpt-4o-mini", "choices": [{"message": {"content": "answer"}}],
+                 "usage": {"prompt_tokens": 100, "completion_tokens": 50}}, {}
+
+
+def test_success_is_recorded_once_with_usage_and_cost(monkeypatch):
+    logged, sent = _mock_dispatch(monkeypatch, [_successful_response()])
+    result = gw.call("tenant", "summary", pv.Request("gpt-4o-mini", "system", "question"),
+                     provider_key="openai", budget=gw.Budget(25))
+    assert len(sent) == len(logged) == len(result.attempts) == 1
+    assert logged[0].status == "success"
+    assert logged[0].total_tokens == 150
+    assert logged[0].cost_usd > 0
+
+
+def test_budget_is_rechecked_before_retry(monkeypatch):
+    logged, sent = _mock_dispatch(monkeypatch, [(429, {}, {}), _successful_response()])
+    spent = iter([0, 25])
+    monkeypatch.setattr(gw, "spend_this_month", lambda _: next(spent))
+    with pytest.raises(gw.BudgetExceeded):
+        gw.call("tenant", "summary", pv.Request("gpt-4o-mini", "system", "question"),
+                provider_key="openai", budget=gw.Budget(25))
+    assert len(sent) == len(logged) == 1
+    assert logged[0].status == "error"
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+def test_nonretryable_http_never_reaches_fallback(monkeypatch, status):
+    logged, sent = _mock_dispatch(monkeypatch, [(status, {}, {})])
+    monkeypatch.setenv("LLM_FALLBACK_PROVIDERS", "anthropic")
+    with pytest.raises(gw.ProviderUnavailable):
+        gw.call("tenant", "summary", pv.Request("gpt-4o-mini", "system", "question"),
+                provider_key="openai", budget=gw.Budget(25))
+    assert len(sent) == len(logged) == 1
+    assert logged[0].provider == "openai"
+
+
+def test_missing_key_does_not_try_another_provider(monkeypatch):
+    logged, sent = _mock_dispatch(monkeypatch, [])
+    monkeypatch.setenv("LLM_FALLBACK_PROVIDERS", "anthropic")
+    def missing(*args):
+        raise pv.ProviderMisconfigured("missing key")
+    monkeypatch.setattr(pv, "build_call", missing)
+    with pytest.raises(pv.ProviderMisconfigured):
+        gw.call("tenant", "summary", pv.Request("gpt-4o-mini", "system", "question"),
+                provider_key="openai", budget=gw.Budget(25))
+    assert len(sent) == 0
+    assert len(logged) == 1
