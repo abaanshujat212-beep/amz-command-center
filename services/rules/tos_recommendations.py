@@ -7,19 +7,25 @@ from typing import Any
 
 from packages.shared.action_capabilities import capability
 from services.rules.recommendations import build_metadata
-from services.rules.tos_optimizer import TopOfSearchPlan
+from services.rules.tos_optimizer import AudienceBoostSnapshot, TopOfSearchPlan
 
 
 def review_top_of_search(
     plan: TopOfSearchPlan,
     *,
     now: datetime,
+    current_audience_snapshot: AudienceBoostSnapshot | None,
     objective_snapshot: dict[str, Any],
     strategy_snapshot: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Serialize for review only, not as outbox entries or approved actions."""
     evidence = plan.evidence
-    if evidence is None or not plan.candidates:
+    if (
+        evidence is None or not plan.candidates or evidence.audience_snapshot is None
+        or current_audience_snapshot != evidence.audience_snapshot
+        or now.utcoffset() is None or plan.audience_expires_at is None
+        or not evidence.audience_snapshot.observed_at <= now <= plan.audience_expires_at
+    ):
         return []
     metrics = {
         "currency": evidence.currency,
@@ -54,6 +60,7 @@ def review_top_of_search(
             {
                 "effective_acos_ceiling": str(plan.effective_acos_ceiling),
                 "combined_top_bid": str(plan.combined_top_bid),
+                "effective_bid_basis": "gb_gbp_fixed_bid_with_max_verified_audience_boost",
                 "estimated_incremental_daily_spend": str(plan.estimated_incremental_daily_spend),
                 "estimation_basis": "peak_observed_keyword_clicks_with_full_bid_delta_as_cpc",
             }
