@@ -1,7 +1,9 @@
 import os
+import re
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -101,3 +103,27 @@ def test_cancelled_order_accepts_only_exact_existing_retry(context):
     with pytest.raises(ReceiptReviewError, match="issued order"):
         save_receipt_review(db, **{**args, "observation": replace(args["observation"],
             review_id=uuid.uuid4(), source_ref="new-delivery")})
+
+
+def test_web_queries_read_persisted_receipts_without_cross_tenant_access(context):
+    db, args = context
+    source = (Path(__file__).parents[1] / "apps/web/lib/receipt-history.ts").read_text(encoding="utf-8")
+    def run(name, tenant):
+        sql = re.search(rf"export const {name} = `(.*?)`", source, re.S).group(1)
+        sql = sql.replace("$1", "%(tenant)s").replace("$2", "%(order)s")
+        return db.execute(sql, {"tenant": tenant, "order": args["order_id"]}).fetchall()
+    empty = run("RECEIPT_SUMMARY_SQL", args["tenant_id"])[0]
+    assert float(empty["outstanding"]) == 10
+    assert empty["review_count"] == 0
+    save_receipt_review(db, **args)
+    summary = run("RECEIPT_SUMMARY_SQL", args["tenant_id"])[0]
+    assert float(summary["accepted"]) == 4
+    assert float(summary["damaged"]) == 1
+    assert float(summary["outstanding"]) == 5
+    history = run("RECEIPT_HISTORY_SQL", args["tenant_id"])
+    assert len(history) == 1
+    assert history[0]["sellable_sku"] == "SELL-1"
+    assert run("RECEIPT_HISTORY_SQL", uuid.uuid4()) == []
+    db.execute("select set_tenant(%s)", (uuid.uuid4(),))
+    assert run("RECEIPT_SUMMARY_SQL", args["tenant_id"]) == []
+    assert run("RECEIPT_HISTORY_SQL", args["tenant_id"]) == []
