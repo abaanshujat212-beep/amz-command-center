@@ -54,10 +54,10 @@ export default async function History({ searchParams }: { searchParams: Promise<
 		<div className="flex flex-wrap items-baseline justify-between gap-3"><h1 className="text-lg font-semibold">Run history & decisions</h1><WindowPicker days={days} /></div>
 		<section className="grid gap-4 lg:grid-cols-2">
 			<div className="rounded-lg border border-slate-200 bg-white p-4">
-				<div className="mb-3 flex items-center justify-between"><h2 className="font-medium">Open alerts</h2><span className="text-xs text-slate-500">{alerts.length} open</span></div>
+				<div className="mb-3 flex items-center justify-between"><h2 className="font-medium">Open alerts</h2><Link href="/alerts" className="text-xs text-blue-800 underline">Open operator alerts</Link></div>
 				{alerts.length === 0 ? <p className="text-sm text-slate-500">No open alerts.</p> : <div className="space-y-2">{alerts.map((a) => <div key={a.id} className="rounded border border-slate-100 p-2 text-sm"><div className={`font-medium ${statusTone(a.severity)}`}>{a.severity}: {a.title}</div><div className="text-xs text-slate-500">{a.kind}{a.entity_ref ? ` · ${a.entity_ref}` : ""} · {stamp(a.created_at)}</div><div className="text-xs text-slate-400">{a.notification_source ? `${a.notification_source} · in-app ${a.in_app_status ?? "not routed"}` : "legacy alert · not routed"}</div></div>)}</div>}
 			</div>
-			<div className="rounded-lg border border-slate-200 bg-white p-4">
+			<div id="pipeline-runs" className="scroll-mt-20 rounded-lg border border-slate-200 bg-white p-4">
 				<div className="mb-3 flex items-center justify-between"><h2 className="font-medium">Recent pipeline runs</h2><span className="text-xs text-slate-500">latest {runs.length}</span></div>
 				{runs.length === 0 ? <p className="text-sm text-slate-500">No pipeline runs yet.</p> : <div className="space-y-2">{runs.map((r, i) => <div key={`${r.dataset}-${r.started_at}-${i}`} className="grid grid-cols-[1fr_auto] gap-2 rounded border border-slate-100 p-2 text-sm"><div><div className="font-medium">{r.dataset}</div><div className="text-xs text-slate-500">{stamp(r.started_at)}{r.finished_at ? ` → ${stamp(r.finished_at)}` : ""}</div>{r.error && <div className="text-xs text-bad">{r.error}</div>}</div><div className={`text-xs ${statusTone(r.status)}`}>{r.status}<div className="text-right text-slate-500">{r.rows_loaded ?? 0} rows</div></div></div>)}</div>}
 			</div>

@@ -222,6 +222,49 @@ def comparison(metric: str, application: Decimal | None, reference: Decimal | No
     }
 
 
+def compare_coverage(
+    application: list[Record], reference: list[Record], *, start: date, end: date
+) -> dict[str, Any]:
+    """A matching total is not evidence for missing or non-comparable dates."""
+    required_days = (end - start).days + 1
+
+    def collect(records: list[Record]) -> dict[str, set[date]]:
+        coverage: dict[str, set[date]] = {grain: set() for grain in GRAINS}
+        for row in records:
+            coverage[row.grain].add(row.report_date)
+            if row.grain == "placement":
+                coverage.setdefault(f"placement.{row.placement}", set()).add(row.report_date)
+        return coverage
+
+    app, ref = collect(application), collect(reference)
+    details = {}
+    for key in sorted(app.keys() | ref.keys()):
+        app_days, ref_days = app.get(key, set()), ref.get(key, set())
+        reasons = []
+        if not app_days:
+            reasons.append("application_missing")
+        if not ref_days:
+            reasons.append("reference_missing")
+        if app_days != ref_days:
+            reasons.append("date_mismatch")
+        if key in GRAINS:
+            if app_days and (len(app_days) != required_days
+                             or min(app_days) < start or max(app_days) > end):
+                reasons.append("application_incomplete_window")
+            if ref_days and (len(ref_days) != required_days
+                             or min(ref_days) < start or max(ref_days) > end):
+                reasons.append("reference_incomplete_window")
+        details[key] = {
+            "application_date_count": len(app_days),
+            "reference_date_count": len(ref_days),
+            "application_only_dates": sorted(day.isoformat() for day in app_days - ref_days),
+            "reference_only_dates": sorted(day.isoformat() for day in ref_days - app_days),
+            "reasons": reasons,
+        }
+    return {"expected_days": required_days, "by_grain": details,
+            "complete": not any(value["reasons"] for value in details.values())}
+
+
 def make_report(app_records: list[Record], ref_records: list[Record], *, start: date, end: date,
                 definitions: dict[str, str], limits: dict[str, dict[str, Decimal]],
                 app_meta: dict[str, Any], ref_meta: dict[str, Any]) -> dict[str, Any]:
@@ -259,6 +302,9 @@ def make_report(app_records: list[Record], ref_records: list[Record], *, start: 
     result = "fail" if "fail" in states else (
         "pass" if states and all(state == "pass" for state in states) else "unassessed"
     )
+    coverage = compare_coverage(app_records, ref_records, start=start, end=end)
+    if not coverage["complete"]:
+        result = "incomplete"
     return {
         "schema_version": 1,
         "window": {"start_inclusive": start.isoformat(), "end_inclusive": end.isoformat()},
@@ -275,6 +321,7 @@ def make_report(app_records: list[Record], ref_records: list[Record], *, start: 
         },
         "comparisons": comparisons,
         "placement_comparisons": placement_comparisons,
+        "coverage": coverage,
         "result": result,
     }
 

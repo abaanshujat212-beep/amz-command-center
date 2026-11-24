@@ -78,6 +78,9 @@ _SCOPE_AGG: dict[str, str] = {
         false                                     as exists_as_exact
     """,
     "keyword": """
+        case when count(*) = count(nullif(btrim(campaign_id::text), ''))
+                    and count(distinct campaign_id) = 1
+             then min(campaign_id)::text end       as campaign_id,
         max(bid)                                  as bid,
         avg(top_of_search_impression_share)       as top_of_search_impression_share,
         avg(account_cvr)                          as account_cvr,

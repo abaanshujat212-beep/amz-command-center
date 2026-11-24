@@ -30,6 +30,7 @@ from services.rules.compiler import (
 from services.rules.evidence import build_guardrail_context
 from services.rules.freshness import resolve_source_freshness
 from services.rules.harvest import plan_harvest, record_lineage, resolve_harvest_bid
+from services.rules.native_controls import evaluate_proposed_native_control
 from services.rules.protections import active_protection
 from services.rules.query import SCOPE_SOURCES, fetch_candidates
 from services.rules.recommendations import build_metadata, configuration_snapshots
@@ -308,6 +309,25 @@ def evaluate_tenant(
                         negative_asin = configured_asin
 
                 metrics = {k: v for k, v in row.items() if k != "matched"}
+                if decision.allowed and not diagnostic:
+                    native = evaluate_proposed_native_control(
+                        cur,
+                        tenant_id=tenant_id,
+                        action_type=action_type,
+                        entity_type=rule["scope"],
+                        entity_id=key[1],
+                        before_value={"value": current},
+                        after_value={"destination": harvest.destination} if harvest else {},
+                        metrics_snapshot=metrics,
+                        now=now,
+                    )
+                    if native.reason_code:
+                        metrics["native_control"] = {
+                            "reason_code": native.reason_code,
+                            "explanation": native.explanation,
+                            "ownership_options": native.ownership_options,
+                        }
+                        decision.block(gr.Guard(native.reason_code), native.explanation)
                 metrics["source_freshness"] = freshness.as_dict()
                 metrics["freshness_days"] = (
                     max(0.0, (now - freshness.data_loaded_at).total_seconds() / 86400)
@@ -337,6 +357,8 @@ def evaluate_tenant(
                 )
                 if harvest is not None:
                     reason = f"{reason} Routing: {harvest.routing_reason}"
+                if "native_control" in metrics:
+                    reason = f"{reason} {metrics['native_control']['explanation']}"
 
                 metadata = build_metadata(
                     action_type=action_type,
@@ -446,7 +468,7 @@ def evaluate_tenant(
                         claimed.add(key)
                         s.proposed += 1
 
-                metric_keys = sorted(k for k, value in metrics.items() if value is not None and k not in {"source_freshness","guardrail_context","harvest_routing","harvest_bid"})
+                metric_keys = sorted(k for k, value in metrics.items() if value is not None and k not in {"source_freshness","guardrail_context","harvest_routing","harvest_bid","native_control"})
                 completeness = "complete" if freshness.usable and metrics.get("break_even_acos") is not None else "partial"
                 cur.execute(
                     """insert into recommendation_evidence(tenant_id,optimizer_run_id,evaluation_id,action_id,
