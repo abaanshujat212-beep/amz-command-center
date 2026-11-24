@@ -135,7 +135,13 @@ ADS_REPORT_LOOKBACK_DAYS: dict[str, int] = {
 
 SP_REPORT_TYPES: dict[str, str] = {
     "GET_SALES_AND_TRAFFIC_REPORT": "Sessions, page views, unit session percentage. Max 3 requests per 5 minutes; dataStartTime within 2 years; asinGranularity=CHILD.",
-    "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT": "SQP search terms, weekly (Sun-Sat). Requires Brand Analytics role and brand registration.",
+    # Search Query Performance (SQP) is a separate Amazon report. Do not add it
+    # to this request allowlist until native ingestion exists; SQP is manual CSV today.
+    "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT": (
+        "Amazon Search Terms Report: search frequency rank and most-clicked ASINs "
+        "by term and department, not product placement. Requires Brand Analytics "
+        "role, Brand Registry, and brand-representative access."
+    ),
     "GET_BRAND_ANALYTICS_SEARCH_CATALOG_PERFORMANCE_REPORT": "Per-ASIN search funnel.",
     "GET_COUPON_PERFORMANCE_REPORT": "Coupon spend, for true promotional cost.",
 }
