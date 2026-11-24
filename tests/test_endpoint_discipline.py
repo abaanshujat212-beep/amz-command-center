@@ -256,3 +256,43 @@ def test_ads_token_url_is_regional_but_sp_token_url_is_not():
     assert ads_client("eu").token_url == "https://api.amazon.co.uk/auth/o2/token"
     assert ads_client("na").token_url == "https://api.amazon.com/auth/o2/token"
     assert sp_client("eu").token_url == sp_client("na").token_url
+
+
+def test_search_terms_metadata_does_not_enable_native_search_query_performance(monkeypatch):
+    label = ep.SP_REPORT_TYPES[sp_api.BRAND_ANALYTICS_SEARCH_TERMS]
+    assert label.startswith("Amazon Search Terms Report:")
+    assert "search frequency rank" in label and "most-clicked ASINs" in label
+    assert "not product placement" in label
+    assert "SQP" not in label
+
+    sqp = "GET_BRAND_ANALYTICS_SEARCH_QUERY_PERFORMANCE_REPORT"
+    assert sqp not in ep.SP_REPORT_TYPES
+    client = sp_client()
+
+    def no_request(*_args, **_kwargs):
+        pytest.fail("An unverified SQP enum must not reach the provider request boundary")
+
+    monkeypatch.setattr(client, "_call", no_request)
+    monkeypatch.setattr(rate_limit, "acquire_report_type", no_request)
+    with pytest.raises(sp_api.UnknownReportType, match=sqp):
+        client.create_report(sqp, dt.date.today(), dt.date.today(), {
+            "asin": "B000TEST01", "reportPeriod": "WEEK",
+        })
+
+
+def test_search_terms_keeps_its_existing_dispatch_identifier(monkeypatch):
+    client = sp_client()
+    report_type = sp_api.BRAND_ANALYTICS_SEARCH_TERMS
+    assert report_type == "GET_BRAND_ANALYTICS_SEARCH_TERMS_REPORT"
+    seen = []
+
+    def pretend(endpoint, *, body):
+        seen.append((endpoint, body["reportType"]))
+        return {"reportId": "fixture"}
+
+    monkeypatch.setattr(client, "_call", pretend)
+    monkeypatch.setattr(rate_limit, "acquire_report_type", lambda _kind: None)
+    assert client.create_report(
+        report_type, dt.date.today(), dt.date.today(), {"reportPeriod": "DAY"},
+    ) == "fixture"
+    assert seen == [("sp.reports.create", report_type)]
