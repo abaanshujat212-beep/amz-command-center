@@ -81,3 +81,23 @@ def test_receipt_rls_and_immutable_permissions(context):
     assert db.execute("select count(*) n from purchase_receipt_review").fetchone()["n"] == 0
     with pytest.raises(ReceiptReviewError):
         save_receipt_review(db, **args)
+
+
+def test_audit_failure_rolls_back_receipt(context):
+    db, args = context
+    db.execute("reset role")
+    db.execute("revoke insert on audit_log from axaty_app")
+    db.execute("set local role axaty_app")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+        save_receipt_review(db, **args)
+    assert db.execute("select count(*) n from purchase_receipt_review").fetchone()["n"] == 0
+
+
+def test_cancelled_order_accepts_only_exact_existing_retry(context):
+    db, args = context
+    save_receipt_review(db, **args)
+    db.execute("update supplier_purchase_order set state='cancelled' where id=%s", (args["order_id"],))
+    assert save_receipt_review(db, **args).replay
+    with pytest.raises(ReceiptReviewError, match="issued order"):
+        save_receipt_review(db, **{**args, "observation": replace(args["observation"],
+            review_id=uuid.uuid4(), source_ref="new-delivery")})

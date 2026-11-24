@@ -1,9 +1,9 @@
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-LIB = (ROOT / "apps/web/lib/blocked-evaluations.ts").read_text()
-PAGE = (ROOT / "apps/web/app/recommendations/blocked/page.tsx").read_text()
-LIST = (ROOT / "apps/web/app/recommendations/page.tsx").read_text()
+LIB = (ROOT / "apps/web/lib/blocked-evaluations.ts").read_text(encoding="utf-8")
+PAGE = (ROOT / "apps/web/app/recommendations/blocked/page.tsx").read_text(encoding="utf-8")
+LIST = (ROOT / "apps/web/app/recommendations/page.tsx").read_text(encoding="utf-8")
 
 
 def test_panel_is_tenant_scoped_bounded_and_not_an_approval_queue():
