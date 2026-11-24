@@ -11,8 +11,11 @@ Exact retries return the stored event without another audit; changed retries and
 over-receipts fail. Migration 0079 supplies tenant-linked foreign keys, source
 uniqueness, forced RLS and append-only application grants.
 
-This is a service boundary, not yet a web receiving screen. Inventory/COGS
-posting, receipt reversal and FBA delivery integration remain unavailable.
+Purchase orders link to a tenant-scoped receiving history screen, with reviewed
+accepted/damaged totals and unreviewed quantity. The screen shows the latest
+100 records while totals include the complete history. Receipt entry remains a
+trusted-service operation; inventory/COGS posting, receipt reversal and FBA
+delivery integration remain unavailable.
 
 Builds on the single-line internal PO and the inventory-location contract. The
 pure service `services.inventory.purchase_receipt_review.review_receipt` returns

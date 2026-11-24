@@ -53,6 +53,7 @@ export default async function PurchaseOrders({searchParams}:{searchParams:Promis
 			{!orders.length&&<p className="text-sm text-slate-600">No purchase orders yet.</p>}
 			{orders.map(o=><article key={o.id} className="space-y-2 rounded border p-3">
 				<h3 className="font-medium">{o.supplier_name} · {o.product_name}</h3>
+				<a href={`/suppliers/purchase-orders/${o.id}`} className="text-sm underline">View receiving reviews</a>
 				<p className="text-sm">{o.state} · {o.product_sku} · Quote {o.quote_ref} v{o.quote_version}</p>
 				<p className="text-sm">{o.quantity} × {o.currency} {o.unit_price} = {o.currency} {o.total} before freight or other charges</p>
 				{canManagePO(a.role)&&o.state!=="cancelled"&&<form action={changePO} className="flex flex-wrap gap-2">
