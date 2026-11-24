@@ -1,4 +1,18 @@
-# Purchase-order receiving (offline review only)
+# Purchase-order receiving reviews
+
+`services.inventory.receipt_repository.save_receipt_review` now persists reviews
+and their audit records atomically. The authenticated caller supplies the actor,
+establishes tenant RLS and owns the outer transaction. Owner/admin membership is
+resolved from the database. The order is locked across locations before reading
+its complete receipt history, and the location is resolved server-side. The
+reviewer explicitly attests the supplier-to-sellable SKU mapping with an evidence
+reference. Observation time must lie between order creation and the current time.
+Exact retries return the stored event without another audit; changed retries and
+over-receipts fail. Migration 0079 supplies tenant-linked foreign keys, source
+uniqueness, forced RLS and append-only application grants.
+
+This is a service boundary, not yet a web receiving screen. Inventory/COGS
+posting, receipt reversal and FBA delivery integration remain unavailable.
 
 Builds on the single-line internal PO and the inventory-location contract. The
 pure service `services.inventory.purchase_receipt_review.review_receipt` returns
