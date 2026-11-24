@@ -22,6 +22,7 @@ What is deliberately impossible here:
 
 from __future__ import annotations
 
+import math
 import os
 import time
 import uuid
@@ -84,6 +85,10 @@ class ProviderUnavailable(LlmError):
 @dataclass(frozen=True)
 class Budget:
     monthly_usd: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.monthly_usd) or self.monthly_usd < 0:
+            raise LlmError("LLM monthly budget must be finite and nonnegative")
 
     @classmethod
     def from_env(cls) -> "Budget":
@@ -282,7 +287,9 @@ def retry_delay(attempt: int, retry_after: str | None) -> float:
     """Honour Retry-After when the provider sends one; back off otherwise."""
     if retry_after:
         try:
-            return min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
+            seconds = float(retry_after)
+            if math.isfinite(seconds) and seconds >= 0:
+                return min(seconds, MAX_RETRY_AFTER_SECONDS)
         except ValueError:
             pass
     return min(2.0**attempt, MAX_RETRY_AFTER_SECONDS)
@@ -300,6 +307,8 @@ def check_budget(tenant_id: str, budget: Budget, estimated: float) -> float:
             "Set a positive ceiling to enable them."
         )
     spent = spend_this_month(tenant_id)
+    if not all(math.isfinite(value) and value >= 0 for value in (spent, estimated)):
+        raise LlmError("LLM spend and estimate must be finite and nonnegative")
     if spent + estimated > budget.monthly_usd:
         raise BudgetExceeded(
             f"this month's LLM spend is ${spent:.4f} and this call would add about "
@@ -398,11 +407,10 @@ def call(
                 raise
             estimated = 0.0
 
-        # Budget is checked once per provider, because a fallback is another call
-        # and another charge.
-        check_budget(tenant_id, budget, estimated)
-
         for attempt_no in range(1, MAX_ATTEMPTS_PER_PROVIDER + 1):
+            # Retried requests can incur additional charges too. Re-read the
+            # ledger before every dispatch, including retries and fallbacks.
+            check_budget(tenant_id, budget, estimated)
             row = Attempt(
                 tenant_id=tenant_id,
                 purpose=purpose,
@@ -460,7 +468,9 @@ def call(
                 row.status = STATUS_ERROR
                 row.error = f"{type(exc).__name__}: {exc}"
                 last_error = exc
-                if attempt_no < MAX_ATTEMPTS_PER_PROVIDER and should_fallback(None, exc):
+                if isinstance(exc, pv.ProviderMisconfigured) or not should_fallback(status_code, exc):
+                    raise
+                if attempt_no < MAX_ATTEMPTS_PER_PROVIDER:
                     time.sleep(retry_delay(attempt_no, None))
                     continue
                 break
@@ -469,7 +479,7 @@ def call(
                 # only by successes under-counts exactly when it matters most.
                 if row.status != STATUS_SUCCESS:
                     attempts.append(row)
-                    record(row)
+                record(row)
 
     raise ProviderUnavailable(
         f"all providers failed ({', '.join(chain)}); last error: {last_error}"
