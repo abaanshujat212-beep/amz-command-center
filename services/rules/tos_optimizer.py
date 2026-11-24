@@ -26,6 +26,22 @@ class TopOfSearchPolicy:
     min_clicks: int
     min_orders: int
     max_age: timedelta
+    max_effective_top_bid: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class AudienceBoostSnapshot:
+    tenant_id: str
+    profile_id: str
+    campaign_id: str
+    marketplace: str
+    currency: str
+    bidding_strategy: str
+    observed_at: datetime
+    source_revision: str
+    complete: bool
+    # A verified empty inventory is (), not None. IDs are never serialized.
+    adjustments: tuple[tuple[str, int], ...] | None
 
 
 @dataclass(frozen=True)
@@ -57,6 +73,7 @@ class TopOfSearchEvidence:
     # campaign, across ad groups. None means unknown, not empty.
     campaign_only_target_is_this_keyword: bool | None = None
     campaign_target_inventory_at: datetime | None = None
+    audience_snapshot: AudienceBoostSnapshot | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +96,7 @@ class TopOfSearchPlan:
     effective_acos_ceiling: Decimal | None = None
     combined_top_bid: Decimal | None = None
     estimated_incremental_daily_spend: Decimal | None = None
+    audience_expires_at: datetime | None = None
 
 
 def _decimal(value: object) -> Decimal:
@@ -96,6 +114,38 @@ def _counts(*values: object) -> bool:
 
 def _aware(value: object) -> bool:
     return isinstance(value, datetime) and value.utcoffset() is not None
+
+
+def maximum_audience_boost(
+    evidence: TopOfSearchEvidence, snapshot: AudienceBoostSnapshot | None,
+    *, now: datetime, max_age: timedelta,
+) -> int | None:
+    if (
+        snapshot is None or snapshot.complete is not True
+        or (snapshot.tenant_id, snapshot.profile_id, snapshot.campaign_id, snapshot.currency)
+        != (evidence.tenant_id, evidence.profile_id, evidence.campaign_id, evidence.currency)
+        or snapshot.marketplace != "GB" or snapshot.currency != "GBP"
+        or snapshot.bidding_strategy != "fixed"
+        or not isinstance(snapshot.source_revision, str) or not snapshot.source_revision.strip()
+        or not _aware(snapshot.observed_at)
+        or not now - max_age <= snapshot.observed_at <= now
+        or not isinstance(snapshot.adjustments, tuple)
+    ):
+        return None
+    seen = set()
+    winning = 0
+    for row in snapshot.adjustments:
+        if not isinstance(row, tuple) or len(row) != 2:
+            return None
+        audience_id, boost = row
+        if (
+            not isinstance(audience_id, str) or not audience_id.strip() or audience_id in seen
+            or type(boost) is not int or not 0 <= boost <= 900
+        ):
+            return None
+        seen.add(audience_id)
+        winning = max(winning, boost)
+    return winning
 
 
 def plan_top_of_search(
@@ -212,6 +262,19 @@ def plan_top_of_search(
     ):
         return TopOfSearchPlan((), ("low_or_inconsistent_placement_data",), evidence)
 
+    audience_pct = maximum_audience_boost(
+        evidence, evidence.audience_snapshot, now=now, max_age=policy.max_age,
+    )
+    if audience_pct is None:
+        return TopOfSearchPlan((), ("audience_or_fixed_bid_evidence_unavailable",), evidence)
+    try:
+        effective_cap = _decimal(policy.max_effective_top_bid)
+        if effective_cap <= 0:
+            raise ValueError("effective ceiling must be positive")
+    except (ValueError, InvalidOperation):
+        return TopOfSearchPlan((), ("effective_top_bid_ceiling_unavailable",), evidence)
+    audience_factor = 1 + Decimal(audience_pct) / 100
+
     ceiling = min(acos, break_even)
     if spend / sales >= ceiling or top_spend / top_sales >= ceiling:
         return TopOfSearchPlan((), ("acos_or_economics_ceiling",), evidence, ceiling)
@@ -220,16 +283,19 @@ def plan_top_of_search(
         return TopOfSearchPlan((), ("no_campaign_budget_headroom",), evidence, ceiling)
 
     def effective(base: Decimal, pct: int) -> Decimal:
-        return base * (1 + Decimal(pct) / 100)
+        return base * (1 + Decimal(pct) / 100) * audience_factor
 
     before_pct = evidence.current_modifier_pct
     current = effective(bid, before_pct)
-    other_factor = Decimal(1) + Decimal(evidence.other_max_modifier_pct) / 100
+    other_factor = (1 + Decimal(evidence.other_max_modifier_pct) / 100) * audience_factor
     max_base_budget = bid + headroom / evidence.peak_daily_keyword_clicks / other_factor
     max_cpc = min(
+        effective_cap,
         ceiling * top_sales / evidence.top_clicks,
         current + headroom / evidence.peak_daily_keyword_clicks,
     )
+    if current >= effective_cap:
+        return TopOfSearchPlan((), ("effective_top_bid_ceiling_reached",), evidence, ceiling, current)
     if max_cpc <= current:
         return TopOfSearchPlan((), ("no_effective_bid_headroom",), evidence, ceiling)
 
@@ -261,7 +327,7 @@ def plan_top_of_search(
             max_bid,
             max_base_budget,
             bid + max(_CENT, bid_step * gap),
-            bid_ceiling / (1 + Decimal(before_pct) / 100),
+            bid_ceiling / ((1 + Decimal(before_pct) / 100) * audience_factor),
         )
         base_after = raw // _CENT * _CENT
         if base_after > bid:
@@ -269,7 +335,7 @@ def plan_top_of_search(
                 Candidate("set_bid", "keyword", evidence.keyword_id, bid, base_after, None)
             )
     if modifier_allowed:
-        pct_within_joint_cap = int((max_cpc / base_after - 1) * 100)
+        pct_within_joint_cap = int((max_cpc / (base_after * audience_factor) - 1) * 100)
         after_pct = min(
             policy.max_modifier_pct,
             before_pct + max(1, int(policy.max_modifier_step_pct * gap)),
@@ -302,4 +368,5 @@ def plan_top_of_search(
         ceiling,
         combined,
         stress_cost,
+        evidence.audience_snapshot.observed_at + policy.max_age,
     )
