@@ -14,9 +14,11 @@ from pathlib import Path
 
 from backup_postgres import connection_env, run_command, sha256_file
 
+# A pristine template0 clone includes the internal pg_toast namespace.
+# Ignore that exact namespace, not a broader pattern that could hide objects.
 EMPTY_DATABASE_SQL = """
 select
-  (select count(*) from pg_namespace where nspname not in ('pg_catalog', 'information_schema', 'public')) +
+  (select count(*) from pg_namespace where nspname not in ('pg_catalog', 'information_schema', 'public', 'pg_toast')) +
   (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public') +
   (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
